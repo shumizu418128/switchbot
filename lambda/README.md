@@ -1,17 +1,21 @@
 # SwitchBot Lock Lambda
 
-SwitchBot ハブ経由でスマートロックを施錠する **AWS Lambda** 用コードです。
-**Lambda Function URL** を前面に置き、`POST` リクエストと `x-api-key` で保護します。
+SwitchBot OpenAPI v1.1 経由でスマートロックに **施錠コマンド（`lock`）** を送る **AWS Lambda** 用コードです。呼び出し側は共有秘密（`x-api-key`）で保護し、**対象デバイス ID はリクエストごとに指定**します。
+
+## 仕様の要点（旧版からの変更）
+
+- **デバイス ID**: 環境変数の固定 ID は使わず、イベントの `device_id` で指定する。
+- **施錠フロー**: 事前にデバイス状態を取得して「施錠済みならスキップ」は行わない。SwitchBot に `lock` コマンドを送るのみ。
+- **認証**: ヘッダー `x-api-key` が環境変数 `API_KEY` と一致すること。
 
 ## 動作
 
-1. `POST`（パスは `/lock` または `/`）を受け取る。
-2. ヘッダー `x-api-key` が環境変数 `API_KEY` と一致するか検証する。
-3. SwitchBot OpenAPI でデバイス状態を取得し、`lockState` が施錠済みなら **何も送らず** `{"ok": true, "result": "already_locked"}` を返す。
-4. 未施錠なら `lock` コマンドを送信し `{"ok": true, "result": "locked"}` を返す。
-5. `lockState` が `jammed` のときは施錠せず HTTP `502`（`device_state`）を返す。
+1. ヘッダー `x-api-key` を検証する（不一致・未設定は拒否）。
+2. イベントに `device_id` があるか確認する（なければエラー）。
+3. `action` が `"lock"` のときだけ、`/v1.1/devices/{device_id}/commands` に施錠コマンドを POST する。
+4. 成功時は SwitchBot API の JSON 応答をそのまま返す。
 
-ハブ（Hub 2 等）とロックがアプリ上で連携済みであること、および OpenAPI のトークンが有効であることが前提です。
+ハブとロックが SwitchBot アプリ上で連携済みであり、Open Token / Secret が有効であることが前提です。
 
 ## 環境変数
 
@@ -20,57 +24,48 @@ SwitchBot ハブ経由でスマートロックを施錠する **AWS Lambda** 用
 | `API_KEY` | はい | 呼び出し側が送る固定 API キー（十分に長いランダム文字列を推奨） |
 | `SWITCHBOT_TOKEN` | はい | SwitchBot アプリの Open Token |
 | `SWITCHBOT_SECRET` | はい | SwitchBot アプリの Secret |
-| `SWITCHBOT_DEVICE_ID` | はい | 対象スマートロックのデバイス ID |
 | `SWITCHBOT_API_BASE_URL` | いいえ | 省略時 `https://api.switch-bot.com` |
+
+## イベント（入力）形式
+
+ハンドラーは **イベントオブジェクトのトップレベル**から次を読みます。
+
+| フィールド | 必須 | 説明 |
+|------------|------|------|
+| `headers` | 実質必須 | `x-api-key` を含む（大文字小文字の扱いは Lambda のイベント実装に依存） |
+| `device_id` | はい | 対象スマートロックのデバイス ID |
+| `action` | はい | `"lock"` のときのみ施錠を実行 |
+
+`action` が `"lock"` 以外、または `device_id` が無い場合は HTTP 相当のエラー用ボディ（例: `400` と JSON）を返します。
+
+**Lambda Function URL / API Gateway** で JSON ボディに `device_id` や `action` を載せる場合は、統合側でイベントのトップレベルにマッピングするか、ハンドラー側で `body` を JSON パースする処理を追加する必要があります（標準の HTTP プロキシイベントではこれらはボディ文字列内にあります）。
 
 ## Lambda の設定
 
-- **ハンドラー**: `src.handler.lambda_handler`
-- **ランタイム**: Python 3.11 以上を推奨（ローカル検証は 3.13 でも可）
-- **デプロイパッケージ**: 次のように `src` パッケージごとルートに含める。
+- **ハンドラー**: `handler.lambda_handler`（デプロイ zip のルートに `handler.py` と `switchbot_client.py` を置く場合）
+  **`src` をルートに含める構成**の場合は `src.handler.lambda_handler` に合わせ、ランタイムの作業ディレクトリ／モジュールパスが `switchbot_client` を解決できるようにしてください。
+- **ランタイム**: Python 3.11 以上（`pyproject.toml` の `requires-python` に準拠）
+- **依存**: 標準ライブラリのみのため、追加パッケージの同梱は不要です。
+
+デプロイ zip の例（`src` 構成のとき）:
 
 ```
 deployment.zip
   src/
     __init__.py
     handler.py
-    models.py
     switchbot_client.py
-```
-
-標準ライブラリのみ使用しているため、依存パッケージの同梱は不要です。
-
-### Function URL
-
-- **認証タイプ**: `NONE`（アプリ側で `x-api-key` を検証）
-- **許可メソッド**: `POST` のみ推奨
-- 呼び出し例:
-
-```http
-POST https://xxxxxxxx.lambda-url.ap-northeast-1.on.aws/lock
-x-api-key: <API_KEYと同じ値>
 ```
 
 ## 開発（テスト）
 
-開発用オプション依存のインストール（[uv](https://github.com/astral-sh/uv) を使用する場合の例）:
+プロジェクトルートは `lambda` ディレクトリです。開発用依存のインストール（[uv](https://github.com/astral-sh/uv) の例）:
 
 ```bash
-cd lambda/switchbot_lock_api
-uv pip install --system "pytest>=8"
+cd lambda
+uv pip install --system ".[dev]"
 python -m pytest tests/ -v
 ```
-
-## レスポンス一覧（概要）
-
-| HTTP | 用途 |
-|------|------|
-| 200 | 施錠済みスキップまたは施錠成功 |
-| 401 | API キー不正 |
-| 404 | パス不正 |
-| 405 | POST 以外 |
-| 502 | SwitchBot API エラー、または jammed |
-| 500 | 設定不備・内部エラー |
 
 ## 参考
 
