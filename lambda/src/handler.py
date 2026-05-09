@@ -16,7 +16,7 @@ def lambda_handler(event: LockEvent, context: LambdaContext):
     """Lambda 関数のハンドラー。"""
     # CO2濃度通知は検証しない
     if event.get("action") == "co2_check":
-        return co2_check(event)
+        return co2_check()
 
     # API キーを検証
     # if not validate_request(event.get("headers", {}).get("x-api-key")):

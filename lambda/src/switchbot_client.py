@@ -159,7 +159,7 @@ def lock(device_id: str) -> dict[str, Any]:
     return _request_json("POST", path, body)
 
 
-def co2_check() -> dict[str, Any]:
+def co2_check():
     """CO2濃度をチェックする。"""
 
     # CO2センサーのデバイス ID
@@ -203,6 +203,3 @@ def co2_check() -> dict[str, Any]:
         )
         with urllib.request.urlopen(req):
             pass  # 成功時は何もしない
-
-
-print(co2_check())
