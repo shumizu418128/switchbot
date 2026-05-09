@@ -219,12 +219,13 @@ def co2_check():
     battery = body.get("battery")
 
     co2_threshold = 1000
-    humidity_threshold = 40
+    humidity_min_threshold = 40
+    humidity_max_threshold = 60
 
     alert_type: str | None = None
     if co2 >= co2_threshold:
         alert_type = "co2"
-    elif humidity >= humidity_threshold:
+    elif humidity <= humidity_min_threshold or humidity >= humidity_max_threshold:
         alert_type = "humidity"
 
     state = _get_alert_state()
@@ -242,7 +243,7 @@ def co2_check():
             }
         else:
             slack_message = {
-                "text": f"<@U099ANR7PL7> :rotating_light: *警告: 湿度が{humidity_threshold}%を超えました*{status}"
+                "text": f"<@U099ANR7PL7> :rotating_light: *警告: 湿度が{humidity_min_threshold}%～{humidity_max_threshold}%を超えました*{status}"
             }
 
         data = json.dumps(slack_message).encode("utf-8")
