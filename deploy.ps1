@@ -81,6 +81,8 @@ Write-Host ""
 Write-Host "SSM パラメータを更新しています..."
 
 $switchBotApiBaseUrl = if ([string]::IsNullOrWhiteSpace($env:SWITCHBOT_API_BASE_URL)) { "https://api.switch-bot.com" } else { $env:SWITCHBOT_API_BASE_URL }
+$co2AlertStateParamName = "/$stackName/CO2_ALERT_STATE"
+$co2AlertStateInitialValue = '{"alert_active":false,"last_alert_type":null,"updated_at":null}'
 $ssmParams = @(
     @{ Name = "/$stackName/TOKEN"; Value = $env:TOKEN; Type = "String" },
     @{ Name = "/$stackName/CLIENT_SECRET"; Value = $env:CLIENT_SECRET; Type = "String" },
@@ -127,6 +129,31 @@ foreach ($param in $ssmParams) {
     } else {
         Write-Host ($putOutput -join "`n")
         Write-Error "SSM パラメータ更新に失敗しました: $($param.Name)"
+    }
+}
+
+Write-Host "通知状態パラメータを確認しています..."
+$co2ParamCheckOutput = (& aws ssm get-parameter `
+    --name $co2AlertStateParamName `
+    --region $awsRegion `
+    --profile $awsProfile 2>&1)
+
+if ($LASTEXITCODE -ne 0) {
+    if (($co2ParamCheckOutput -join "`n") -match "ParameterNotFound") {
+        Write-Host "通知状態パラメータを初期作成します: $co2AlertStateParamName"
+        & aws ssm put-parameter `
+            --name $co2AlertStateParamName `
+            --value $co2AlertStateInitialValue `
+            --type "String" `
+            --region $awsRegion `
+            --profile $awsProfile 2>&1 | Out-Host
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "通知状態パラメータの初期作成に失敗しました: $co2AlertStateParamName"
+        }
+    } else {
+        Write-Host ($co2ParamCheckOutput -join "`n")
+        Write-Error "通知状態パラメータの確認に失敗しました: $co2AlertStateParamName"
     }
 }
 

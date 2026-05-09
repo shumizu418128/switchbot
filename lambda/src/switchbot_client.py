@@ -13,6 +13,9 @@ import urllib.request
 import uuid
 from typing import Any, Literal
 
+import boto3
+from botocore.exceptions import ClientError
+
 if os.getenv("ENV") == "local":
     from dotenv import load_dotenv
 
@@ -27,10 +30,50 @@ SWITCHBOT_API_SUCCESS_STATUS = 100
 TOKEN = os.environ.get("TOKEN", "").strip()
 SECRET = os.environ.get("CLIENT_SECRET", "").strip()
 SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "").strip()
+ALERT_STATE_PARAM = os.environ.get("ALERT_STATE_PARAM", "").strip()
 
 API_BASE_URL = os.environ.get(
     "SWITCHBOT_API_BASE_URL", "https://api.switch-bot.com"
 ).strip()
+ssm_client = boto3.client("ssm")
+
+
+def _get_alert_state() -> dict[str, Any]:
+    """SSM Parameter Store から通知状態を取得する。"""
+    if not ALERT_STATE_PARAM:
+        return {"alert_active": False, "last_alert_type": None, "updated_at": None}
+
+    try:
+        result = ssm_client.get_parameter(Name=ALERT_STATE_PARAM)
+        raw_value = result.get("Parameter", {}).get("Value", "{}")
+        state = json.loads(raw_value)
+    except ssm_client.exceptions.ParameterNotFound:
+        return {"alert_active": False, "last_alert_type": None, "updated_at": None}
+    except (ClientError, json.JSONDecodeError):
+        return {"alert_active": False, "last_alert_type": None, "updated_at": None}
+
+    return {
+        "alert_active": bool(state.get("alert_active", False)),
+        "last_alert_type": state.get("last_alert_type"),
+        "updated_at": state.get("updated_at"),
+    }
+
+
+def _put_alert_state(alert_active: bool, alert_type: str | None) -> None:
+    """SSM Parameter Store に通知状態を保存する。"""
+    if not ALERT_STATE_PARAM:
+        return
+
+    value = json.dumps(
+        {
+            "alert_active": alert_active,
+            "last_alert_type": alert_type,
+            "updated_at": int(time.time()),
+        }
+    )
+    ssm_client.put_parameter(
+        Name=ALERT_STATE_PARAM, Value=value, Type="String", Overwrite=True
+    )
 
 
 class SwitchBotError(Exception):
@@ -178,13 +221,22 @@ def co2_check():
     co2_threshold = 1000
     humidity_threshold = 40
 
-    if co2 >= co2_threshold or humidity >= humidity_threshold:
+    alert_type: str | None = None
+    if co2 >= co2_threshold:
+        alert_type = "co2"
+    elif humidity >= humidity_threshold:
+        alert_type = "humidity"
+
+    state = _get_alert_state()
+    was_alert_active = bool(state.get("alert_active", False))
+
+    if alert_type is not None and not was_alert_active:
         # Slackに送るメッセージ
         status = (
             f"\n`{co2} ppm`\n`{temperature} ℃`\n`{humidity} %`\n`battery: {battery} %`"
         )
 
-        if co2 >= co2_threshold:
+        if alert_type == "co2":
             slack_message = {
                 "text": f"<@U099ANR7PL7> :rotating_light: *警告: CO2濃度が{co2_threshold}ppmを超えました*{status}"
             }
@@ -202,3 +254,8 @@ def co2_check():
         )
         with urllib.request.urlopen(req):
             pass  # 成功時は何もしない
+
+        _put_alert_state(True, alert_type)
+
+    if alert_type is None and was_alert_active:
+        _put_alert_state(False, None)

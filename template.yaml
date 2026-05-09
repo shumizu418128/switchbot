@@ -17,12 +17,20 @@ Resources:
       CodeUri: lambda/src/
       Handler: handler.lambda_handler
       Description: Checks SwitchBot CO2 sensor status every five minutes.
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+                - ssm:PutParameter
+              Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/CO2_ALERT_STATE
       Environment:
         Variables:
           TOKEN: !Sub "{{resolve:ssm:/${AWS::StackName}/TOKEN}}"
           CLIENT_SECRET: !Sub "{{resolve:ssm:/${AWS::StackName}/CLIENT_SECRET}}"
           SLACK_WEBHOOK_URL: !Sub "{{resolve:ssm:/${AWS::StackName}/SLACK_WEBHOOK_URL}}"
           SWITCHBOT_API_BASE_URL: !Sub "{{resolve:ssm:/${AWS::StackName}/SWITCHBOT_API_BASE_URL}}"
+          ALERT_STATE_PARAM: !Sub /${AWS::StackName}/CO2_ALERT_STATE
       Events:
         FiveMinuteSchedule:
           Type: Schedule
