@@ -13,14 +13,18 @@ import urllib.request
 import uuid
 from typing import Any, Literal
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 # Lambda JSON ボディで返す結果コード
 ResultCode = Literal["locked", "already_locked"]
 
 # SwitchBot API の成功コード（公式ドキュメント）
 SWITCHBOT_API_SUCCESS_STATUS = 100
 
-TOKEN = os.environ.get("SWITCHBOT_TOKEN", "").strip()
-SECRET = os.environ.get("SWITCHBOT_SECRET", "").strip()
+TOKEN = os.environ.get("TOKEN", "").strip()
+SECRET = os.environ.get("CLIENT_SECRET", "").strip()
 
 API_BASE_URL = os.environ.get(
     "SWITCHBOT_API_BASE_URL", "https://api.switch-bot.com"
@@ -153,3 +157,52 @@ def lock(device_id: str) -> dict[str, Any]:
         "parameter": "default",
     }
     return _request_json("POST", path, body)
+
+
+def co2_check() -> dict[str, Any]:
+    """CO2濃度をチェックする。"""
+
+    # CO2センサーのデバイス ID
+    co2_device_id = "B0E9FEA40541"
+    path = f"/v1.1/devices/{co2_device_id}/status"
+
+    response = _request_json("GET", path)
+    body = response.get("body", {})
+    co2 = body.get("CO2")
+    temperature = body.get("temperature")
+    humidity = body.get("humidity")
+    battery = body.get("battery")
+
+    co2_threshold = 100
+    humidity_threshold = 40
+
+    if co2 >= co2_threshold or humidity >= humidity_threshold:
+        # Slack Incoming WebhookのURL（適宜書き換えてください）
+        slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
+
+        # Slackに送るメッセージ
+        status = (
+            f"\n`{co2} ppm`\n`{temperature} ℃`\n`{humidity} %`\n`battery: {battery} %`"
+        )
+
+        if co2 >= co2_threshold:
+            slack_message = {
+                "text": f"<@U099ANR7PL7> :rotating_light: *警告: CO2濃度が{co2_threshold}ppmを超えました*{status}"
+            }
+        else:
+            slack_message = {
+                "text": f"<@U099ANR7PL7> :rotating_light: *警告: 湿度が{humidity_threshold}%を超えました*{status}"
+            }
+
+        data = json.dumps(slack_message).encode("utf-8")
+        req = urllib.request.Request(
+            slack_webhook_url,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req):
+            pass  # 成功時は何もしない
+
+
+print(co2_check())

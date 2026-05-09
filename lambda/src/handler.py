@@ -1,7 +1,8 @@
 import json
 import os
 
-from switchbot_client import lock
+from models import LambdaContext, LockEvent
+from switchbot_client import lock, co2_check
 
 
 def validate_request(api_key: str):
@@ -11,8 +12,12 @@ def validate_request(api_key: str):
     return True
 
 
-def lambda_handler(event, context):
+def lambda_handler(event: LockEvent, context: LambdaContext):
     """Lambda 関数のハンドラー。"""
+    # CO2濃度通知は検証しない
+    if event.get("action") == "co2_check":
+        return co2_check(event)
+
     # API キーを検証
     if not validate_request(event.get("headers", {}).get("x-api-key")):
         return {"statusCode": 401, "body": json.dumps({"error": "Unauthorized"})}
