@@ -13,9 +13,10 @@ import urllib.request
 import uuid
 from typing import Any, Literal
 
-from dotenv import load_dotenv
+if os.getenv("ENV") == "local":
+    from dotenv import load_dotenv
 
-load_dotenv()
+    load_dotenv()
 
 # Lambda JSON ボディで返す結果コード
 ResultCode = Literal["locked", "already_locked"]
