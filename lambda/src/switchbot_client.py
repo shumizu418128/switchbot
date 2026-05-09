@@ -25,6 +25,7 @@ SWITCHBOT_API_SUCCESS_STATUS = 100
 
 TOKEN = os.environ.get("TOKEN", "").strip()
 SECRET = os.environ.get("CLIENT_SECRET", "").strip()
+SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "").strip()
 
 API_BASE_URL = os.environ.get(
     "SWITCHBOT_API_BASE_URL", "https://api.switch-bot.com"
@@ -177,9 +178,6 @@ def co2_check():
     humidity_threshold = 40
 
     if co2 >= co2_threshold or humidity >= humidity_threshold:
-        # Slack Incoming WebhookのURL（適宜書き換えてください）
-        slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
-
         # Slackに送るメッセージ
         status = (
             f"\n`{co2} ppm`\n`{temperature} ℃`\n`{humidity} %`\n`battery: {battery} %`"
@@ -196,7 +194,7 @@ def co2_check():
 
         data = json.dumps(slack_message).encode("utf-8")
         req = urllib.request.Request(
-            slack_webhook_url,
+            SLACK_WEBHOOK_URL,
             data=data,
             headers={"Content-Type": "application/json"},
             method="POST",

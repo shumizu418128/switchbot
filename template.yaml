@@ -2,37 +2,13 @@ AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: SwitchBot CO2 check Lambda scheduled by EventBridge.
 
-Parameters:
-  SwitchBotToken:
-    Type: String
-    NoEcho: true
-    Description: SwitchBot Open Token.
-
-  SwitchBotClientSecret:
-    Type: String
-    NoEcho: true
-    Description: SwitchBot Secret Key.
-
-  SlackWebhookUrl:
-    Type: String
-    NoEcho: true
-    Description: Slack Incoming Webhook URL.
-
-  SwitchBotApiBaseUrl:
-    Type: String
-    Default: https://api.switch-bot.com
-    Description: SwitchBot API base URL.
-
 Globals:
   Function:
-    Runtime: python3.11
+    Runtime: python3.13
     Architectures:
       - x86_64
     MemorySize: 128
     Timeout: 60
-    Environment:
-      Variables:
-        SWITCHBOT_API_BASE_URL: !Ref SwitchBotApiBaseUrl
 
 Resources:
   SwitchBotCo2CheckFunction:
@@ -43,9 +19,10 @@ Resources:
       Description: Checks SwitchBot CO2 sensor status every five minutes.
       Environment:
         Variables:
-          TOKEN: !Ref SwitchBotToken
-          CLIENT_SECRET: !Ref SwitchBotClientSecret
-          SLACK_WEBHOOK_URL: !Ref SlackWebhookUrl
+          TOKEN: !Sub "{{resolve:ssm:/${AWS::StackName}/TOKEN}}"
+          CLIENT_SECRET: !Sub "{{resolve:ssm:/${AWS::StackName}/CLIENT_SECRET}}"
+          SLACK_WEBHOOK_URL: !Sub "{{resolve:ssm:/${AWS::StackName}/SLACK_WEBHOOK_URL}}"
+          SWITCHBOT_API_BASE_URL: !Sub "{{resolve:ssm:/${AWS::StackName}/SWITCHBOT_API_BASE_URL}}"
       Events:
         FiveMinuteSchedule:
           Type: Schedule
