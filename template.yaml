@@ -1,0 +1,61 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: SwitchBot CO2 check Lambda scheduled by EventBridge.
+
+Parameters:
+  SwitchBotToken:
+    Type: String
+    NoEcho: true
+    Description: SwitchBot Open Token.
+
+  SwitchBotClientSecret:
+    Type: String
+    NoEcho: true
+    Description: SwitchBot Secret Key.
+
+  SlackWebhookUrl:
+    Type: String
+    NoEcho: true
+    Description: Slack Incoming Webhook URL.
+
+  SwitchBotApiBaseUrl:
+    Type: String
+    Default: https://api.switch-bot.com
+    Description: SwitchBot API base URL.
+
+Globals:
+  Function:
+    Runtime: python3.11
+    Architectures:
+      - x86_64
+    MemorySize: 128
+    Timeout: 60
+    Environment:
+      Variables:
+        SWITCHBOT_API_BASE_URL: !Ref SwitchBotApiBaseUrl
+
+Resources:
+  SwitchBotCo2CheckFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambda/src/
+      Handler: handler.lambda_handler
+      Description: Checks SwitchBot CO2 sensor status every five minutes.
+      Environment:
+        Variables:
+          TOKEN: !Ref SwitchBotToken
+          CLIENT_SECRET: !Ref SwitchBotClientSecret
+          SLACK_WEBHOOK_URL: !Ref SlackWebhookUrl
+      Events:
+        FiveMinuteSchedule:
+          Type: Schedule
+          Properties:
+            Description: Runs the CO2 check every five minutes.
+            Enabled: true
+            Schedule: rate(5 minutes)
+            Input: '{"action":"co2_check"}'
+
+Outputs:
+  SwitchBotCo2CheckFunctionArn:
+    Description: ARN of the SwitchBot CO2 check Lambda function.
+    Value: !GetAtt SwitchBotCo2CheckFunction.Arn
