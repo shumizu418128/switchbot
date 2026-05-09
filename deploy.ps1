@@ -84,10 +84,10 @@ $switchBotApiBaseUrl = if ([string]::IsNullOrWhiteSpace($env:SWITCHBOT_API_BASE_
 $co2AlertStateParamName = "/$stackName/CO2_ALERT_STATE"
 $co2AlertStateInitialValue = '{"alert_active":false,"last_alert_type":null,"updated_at":null}'
 $ssmParams = @(
-    @{ Name = "/$stackName/TOKEN"; Value = $env:TOKEN; Type = "String" },
-    @{ Name = "/$stackName/CLIENT_SECRET"; Value = $env:CLIENT_SECRET; Type = "String" },
-    @{ Name = "/$stackName/SLACK_WEBHOOK_URL"; Value = $env:SLACK_WEBHOOK_URL; Type = "String" },
-    @{ Name = "/$stackName/SWITCHBOT_API_BASE_URL"; Value = $switchBotApiBaseUrl; Type = "String" }
+    @{ Name = "/$stackName/TOKEN"; Value = $env:TOKEN; Type = "SecureString" },
+    @{ Name = "/$stackName/CLIENT_SECRET"; Value = $env:CLIENT_SECRET; Type = "SecureString" },
+    @{ Name = "/$stackName/SLACK_WEBHOOK_URL"; Value = $env:SLACK_WEBHOOK_URL; Type = "SecureString" },
+    @{ Name = "/$stackName/SWITCHBOT_API_BASE_URL"; Value = $switchBotApiBaseUrl; Type = "SecureString" }
 )
 
 foreach ($param in $ssmParams) {
@@ -144,7 +144,7 @@ if ($LASTEXITCODE -ne 0) {
         & aws ssm put-parameter `
             --name $co2AlertStateParamName `
             --value $co2AlertStateInitialValue `
-            --type "String" `
+            --type "SecureString" `
             --region $awsRegion `
             --profile $awsProfile 2>&1 | Out-Host
 

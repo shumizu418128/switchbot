@@ -44,7 +44,7 @@ def _get_alert_state() -> dict[str, Any]:
         return {"alert_active": False, "last_alert_type": None, "updated_at": None}
 
     try:
-        result = ssm_client.get_parameter(Name=ALERT_STATE_PARAM)
+        result = ssm_client.get_parameter(Name=ALERT_STATE_PARAM, WithDecryption=True)
         raw_value = result.get("Parameter", {}).get("Value", "{}")
         state = json.loads(raw_value)
     except ssm_client.exceptions.ParameterNotFound:
@@ -72,7 +72,7 @@ def _put_alert_state(alert_active: bool, alert_type: str | None) -> None:
         }
     )
     ssm_client.put_parameter(
-        Name=ALERT_STATE_PARAM, Value=value, Type="String", Overwrite=True
+        Name=ALERT_STATE_PARAM, Value=value, Type="SecureString", Overwrite=True
     )
 
 
