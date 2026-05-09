@@ -2,7 +2,7 @@ import json
 import os
 
 from models import LambdaContext, LockEvent
-from switchbot_client import lock, co2_check
+from switchbot_client import co2_check
 
 
 def validate_request(api_key: str):
@@ -19,19 +19,19 @@ def lambda_handler(event: LockEvent, context: LambdaContext):
         return co2_check(event)
 
     # API キーを検証
-    if not validate_request(event.get("headers", {}).get("x-api-key")):
-        return {"statusCode": 401, "body": json.dumps({"error": "Unauthorized"})}
+    # if not validate_request(event.get("headers", {}).get("x-api-key")):
+    #     return {"statusCode": 401, "body": json.dumps({"error": "Unauthorized"})}
 
     # デバイス ID を取得
-    device_id = event.get("device_id")
-    if not device_id:
-        return {
-            "statusCode": 400,
-            "body": json.dumps({"error": "Device ID is required"}),
-        }
+    # device_id = event.get("device_id")
+    # if not device_id:
+    #     return {
+    #         "statusCode": 400,
+    #         "body": json.dumps({"error": "Device ID is required"}),
+    #     }
 
     # 施錠コマンドを送信
-    if event.get("action") == "lock":
-        return lock(device_id)
+    # if event.get("action") == "lock":
+    #     return lock(device_id)
 
     return {"statusCode": 400, "body": json.dumps({"error": "Invalid action"})}
