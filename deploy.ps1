@@ -78,61 +78,11 @@ Write-Host "building..."
 & sam build --template-file $templateFile
 
 Write-Host ""
-Write-Host "SSM パラメータを更新しています..."
+Write-Host "通知状態パラメータを確認しています..."
 
 $switchBotApiBaseUrl = if ([string]::IsNullOrWhiteSpace($env:SWITCHBOT_API_BASE_URL)) { "https://api.switch-bot.com" } else { $env:SWITCHBOT_API_BASE_URL }
 $co2AlertStateParamName = "/$stackName/CO2_ALERT_STATE"
 $co2AlertStateInitialValue = '{"alert_active":false,"last_alert_type":null,"updated_at":null}'
-$ssmParams = @(
-    @{ Name = "/$stackName/TOKEN"; Value = $env:TOKEN; Type = "SecureString" },
-    @{ Name = "/$stackName/CLIENT_SECRET"; Value = $env:CLIENT_SECRET; Type = "SecureString" },
-    @{ Name = "/$stackName/SLACK_WEBHOOK_URL"; Value = $env:SLACK_WEBHOOK_URL; Type = "SecureString" },
-    @{ Name = "/$stackName/SWITCHBOT_API_BASE_URL"; Value = $switchBotApiBaseUrl; Type = "SecureString" }
-)
-
-foreach ($param in $ssmParams) {
-    $putOutput = (& aws ssm put-parameter `
-        --name $param.Name `
-        --value $param.Value `
-        --type $param.Type `
-        --overwrite `
-        --region $awsRegion `
-        --profile $awsProfile 2>&1)
-    $putExitCode = $LASTEXITCODE
-
-    if ($putExitCode -eq 0) {
-        continue
-    }
-
-    if (($putOutput -join "`n") -match "different type") {
-        Write-Host "既存パラメータの型が異なるため再作成します: $($param.Name)"
-        & aws ssm delete-parameter `
-            --name $param.Name `
-            --region $awsRegion `
-            --profile $awsProfile 2>&1 | Out-Host
-
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error "SSM パラメータ削除に失敗しました: $($param.Name)"
-        }
-
-        & aws ssm put-parameter `
-            --name $param.Name `
-            --value $param.Value `
-            --type $param.Type `
-            --overwrite `
-            --region $awsRegion `
-            --profile $awsProfile 2>&1 | Out-Host
-
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error "SSM パラメータ更新に失敗しました: $($param.Name)"
-        }
-    } else {
-        Write-Host ($putOutput -join "`n")
-        Write-Error "SSM パラメータ更新に失敗しました: $($param.Name)"
-    }
-}
-
-Write-Host "通知状態パラメータを確認しています..."
 $co2ParamCheckOutput = (& aws ssm get-parameter `
     --name $co2AlertStateParamName `
     --region $awsRegion `
@@ -160,11 +110,19 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host ""
 Write-Host "deploying..."
 
+$parameterOverrides = @(
+    "Token=$($env:TOKEN)",
+    "ClientSecret=$($env:CLIENT_SECRET)",
+    "SlackWebhookUrl=$($env:SLACK_WEBHOOK_URL)",
+    "SwitchBotApiBaseUrl=$switchBotApiBaseUrl"
+)
+
 & sam deploy `
     --stack-name $stackName `
     --region $awsRegion `
     --profile $awsProfile `
     --capabilities CAPABILITY_IAM `
+    --parameter-overrides $parameterOverrides `
     --resolve-s3 `
     --s3-prefix $s3Prefix
 
