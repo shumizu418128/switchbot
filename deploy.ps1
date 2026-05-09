@@ -171,3 +171,6 @@ Write-Host "deploying..."
 if ($LASTEXITCODE -ne 0) {
     Write-Error "デプロイに失敗しました。"
 }
+
+Write-Host ""
+Write-Host ("デプロイ完了: " + (Get-Date -Format "yyyy-MM-dd HH:mm:ss"))
