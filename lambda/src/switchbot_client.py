@@ -175,7 +175,7 @@ def co2_check():
     humidity = body.get("humidity")
     battery = body.get("battery")
 
-    co2_threshold = 100
+    co2_threshold = 1000
     humidity_threshold = 40
 
     if co2 >= co2_threshold or humidity >= humidity_threshold:
