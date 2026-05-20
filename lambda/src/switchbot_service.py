@@ -64,23 +64,35 @@ def on_left_home() -> None:
     print("on_left_home: test message", flush=True)
 
 
-def update_home_presence_from_ssid(ssid: str) -> bool:
-    """受信 SSID と家 SSID を比較し、在宅状態の変化時に処理して保存する。
+WIFI_EVENT_CONNECTED = "wifi_connected"
+WIFI_EVENT_DISCONNECTED = "wifi_disconnected"
+
+
+def update_home_presence_from_ssid(event: str, ssid: str | None = None) -> bool:
+    """Webhook イベントと SSID から在宅判定し、変化時のみ処理して保存する。
+
+    CO2 監視と同様、SSM の以前の状態を読んでから現在の在宅かどうかを決める。
 
     Args:
-        ssid: クライアントから報告された WiFi SSID。
+        event: ``wifi_connected`` または ``wifi_disconnected``。
+        ssid: 接続時の WiFi SSID（切断時は不要）。
 
     Returns:
-        現在の在宅判定（家 SSID と一致すれば ``True``）。
+        現在の在宅判定。
     """
-    at_home = bool(HOME_WIFI_SSID) and ssid == HOME_WIFI_SSID
     state = _get_home_presence_state()
     was_at_home = bool(state.get("at_home", False))
+
+    if event == WIFI_EVENT_CONNECTED:
+        at_home = bool(HOME_WIFI_SSID) and ssid == HOME_WIFI_SSID
+    else:
+        at_home = False
 
     if at_home and not was_at_home:
         on_arrived_home()
         _put_home_presence_state(True)
-    elif not at_home and was_at_home:
+
+    if not at_home and was_at_home:
         on_left_home()
         _put_home_presence_state(False)
 

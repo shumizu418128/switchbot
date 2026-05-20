@@ -206,7 +206,7 @@ Write-Host "  WiFi endpoint: $wifiEndpoint"
 Write-Host "  API key (x-api-key): $apiKeyValueOutput"
 Write-Host ""
 Write-Host "呼び出し例:"
-Write-Host ('  curl -X POST "' + $wifiEndpoint + '" -H "x-api-key: ' + $apiKeyValueOutput + '" -H "Content-Type: application/json" -d "{\"ssid\":\"YOUR_SSID\"}"')
+Write-Host ('  curl -X POST "' + $wifiEndpoint + '" -H "x-api-key: ' + $apiKeyValueOutput + '" -H "Content-Type: application/json" -d "{\"event\":\"wifi_connected\",\"ssid\":\"YOUR_SSID\",\"timestamp\":\"2026-05-20T12:00:00+09:00\"}"')
 
 Write-Host ""
 Write-Host ("デプロイ完了: " + (Get-Date -Format "yyyy-MM-dd HH:mm:ss"))

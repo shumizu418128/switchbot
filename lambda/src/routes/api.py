@@ -8,21 +8,37 @@ from typing import Any
 from api_http import http_response, normalize_path, parse_json_body
 from botocore.exceptions import ClientError
 from models import ApiGatewayEvent
-from switchbot_service import update_home_presence_from_ssid
+from switchbot_service import (
+    WIFI_EVENT_CONNECTED,
+    WIFI_EVENT_DISCONNECTED,
+    update_home_presence_from_ssid,
+)
 
 RouteFn = Callable[[dict[str, Any]], dict[str, Any]]
 
 
 def _handle_wifi(body: dict[str, Any]) -> dict[str, Any]:
-    """POST /wifi: SSID から在宅判定を更新する。"""
-    ssid = body.get("ssid")
+    """POST /wifi: クライアント Webhook イベントから在宅判定を更新する。"""
+    event = body.get("event")
 
-    if not isinstance(ssid, str) or not ssid.strip():
-        return http_response(400, {"error": "ssid is required"})
+    if event not in (WIFI_EVENT_CONNECTED, WIFI_EVENT_DISCONNECTED):
+        return http_response(
+            400,
+            {
+                "error": "event is required",
+                "expected": [WIFI_EVENT_CONNECTED, WIFI_EVENT_DISCONNECTED],
+            },
+        )
 
-    ssid = ssid.strip()
+    ssid: str | None = None
+    if event == WIFI_EVENT_CONNECTED:
+        raw_ssid = body.get("ssid")
+        if not isinstance(raw_ssid, str) or not raw_ssid.strip():
+            return http_response(400, {"error": "ssid is required for wifi_connected"})
+        ssid = raw_ssid.strip()
+
     try:
-        at_home = update_home_presence_from_ssid(ssid)
+        at_home = update_home_presence_from_ssid(event, ssid)
     except ClientError as exc:
         return http_response(
             500, {"error": "failed to update home presence", "detail": str(exc)}
