@@ -1,7 +1,7 @@
 [project]
-name = "switchbot-lock-api"
+name = "switchbot-api"
 version = "0.1.0"
-description = "AWS Lambda: SwitchBot スマートロックを施錠する Function URL 用ハンドラー"
+description = "AWS Lambda: SwitchBot CO2 監視と WiFi SSID 保存 API"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = ["python-dotenv"]

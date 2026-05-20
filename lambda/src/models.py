@@ -1,16 +1,37 @@
-from typing import Literal, TypedDict
+from typing import Any, TypedDict
 
 
 class RequestHeaders(TypedDict, total=False):
     x_api_key: str
 
 
-class LockEvent(TypedDict):
-    """Lambda に渡される入力イベント（簡易版）。"""
+class ScheduledEvent(TypedDict, total=False):
+    """EventBridge スケジュールイベント。"""
 
+    action: str
+
+
+class ApiGatewayEvent(TypedDict, total=False):
+    """API Gateway プロキシ統合イベント。"""
+
+    body: str | dict[str, Any]
     headers: dict[str, str]
-    device_id: str
-    action: Literal["lock"]
+    httpMethod: str
+    path: str
+    rawPath: str
+    requestContext: dict[str, Any]
+
+
+class LambdaEvent(TypedDict, total=False):
+    """Lambda に渡されるイベント（スケジュールまたは API Gateway）。"""
+
+    action: str
+    body: str | dict[str, Any]
+    headers: dict[str, str]
+    httpMethod: str
+    path: str
+    rawPath: str
+    requestContext: dict[str, Any]
 
 
 class LambdaContext:

@@ -4,7 +4,7 @@
 codeuri = "C:\\Users\\shumi\\Documents\\GitHub\\switchbot\\lambda\\src"
 runtime = "python3.13"
 architecture = "x86_64"
-handler = "handler.lambda_handler"
+handler = "router.dispatch"
 manifest_hash = ""
 packagetype = "Zip"
 functions = ["SwitchBotCo2CheckFunction"]

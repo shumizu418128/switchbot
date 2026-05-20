@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: SwitchBot CO2 check Lambda scheduled by EventBridge.
+Description: SwitchBot CO2 check Lambda scheduled by EventBridge with API Gateway WiFi API.
 
 Globals:
   Function:
@@ -23,21 +23,43 @@ Parameters:
   SwitchBotApiBaseUrl:
     Type: String
     Default: https://api.switch-bot.com
+  ApiKeyValue:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Optional. Empty creates an auto-generated API Gateway API key.
+  HomeWifiSsid:
+    Type: String
+    NoEcho: true
+    Description: Home WiFi SSID for at-home presence detection.
+
+Conditions:
+  HasApiKeyValue: !Not [!Equals [!Ref ApiKeyValue, ""]]
 
 Resources:
+  SwitchBotApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub ${AWS::StackName}-api
+      StageName: prod
+      Auth:
+        ApiKeyRequired: true
+
   SwitchBotCo2CheckFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: lambda/src/
-      Handler: handler.lambda_handler
-      Description: Checks SwitchBot CO2 sensor status every five minutes.
+      Handler: router.dispatch
+      Description: Checks SwitchBot CO2 sensor status and exposes WiFi SSID API.
       Policies:
         - Statement:
             - Effect: Allow
               Action:
                 - ssm:GetParameter
                 - ssm:PutParameter
-              Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/CO2_ALERT_STATE
+              Resource:
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/CO2_ALERT_STATE
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/WIFI_SSID
       Environment:
         Variables:
           TOKEN: !Ref Token
@@ -45,6 +67,8 @@ Resources:
           SLACK_WEBHOOK_URL: !Ref SlackWebhookUrl
           SWITCHBOT_API_BASE_URL: !Ref SwitchBotApiBaseUrl
           ALERT_STATE_PARAM: !Sub /${AWS::StackName}/CO2_ALERT_STATE
+          WIFI_STATE_PARAM: !Sub /${AWS::StackName}/WIFI_SSID
+          HOME_WIFI_SSID: !Ref HomeWifiSsid
       Events:
         FiveMinuteSchedule:
           Type: Schedule
@@ -53,8 +77,52 @@ Resources:
             Enabled: true
             Schedule: rate(5 minutes)
             Input: '{"action":"co2_check"}'
+        WifiApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref SwitchBotApi
+            Path: /wifi
+            Method: post
+            Auth:
+              ApiKeyRequired: true
+
+  SwitchBotApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    DependsOn:
+      - SwitchBotApiprodStage
+    Properties:
+      Name: !Sub ${AWS::StackName}-api-key
+      Enabled: true
+      Value: !If [HasApiKeyValue, !Ref ApiKeyValue, !Ref "AWS::NoValue"]
+
+  SwitchBotUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    DependsOn:
+      - SwitchBotApiprodStage
+    Properties:
+      UsagePlanName: !Sub ${AWS::StackName}-usage-plan
+      Description: Usage plan for SwitchBot API
+      ApiStages:
+        - ApiId: !Ref SwitchBotApi
+          Stage: prod
+
+  SwitchBotUsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref SwitchBotApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref SwitchBotUsagePlan
 
 Outputs:
   SwitchBotCo2CheckFunctionArn:
     Description: ARN of the SwitchBot CO2 check Lambda function.
     Value: !GetAtt SwitchBotCo2CheckFunction.Arn
+  SwitchBotApiUrl:
+    Description: API Gateway endpoint URL (prod stage).
+    Value: !Sub https://${SwitchBotApi}.execute-api.${AWS::Region}.amazonaws.com/prod/
+  SwitchBotWifiEndpoint:
+    Description: POST endpoint for WiFi SSID save.
+    Value: !Sub https://${SwitchBotApi}.execute-api.${AWS::Region}.amazonaws.com/prod/wifi
+  SwitchBotApiKeyId:
+    Description: API Gateway API key ID (retrieve value with get-api-key --include-value).
+    Value: !Ref SwitchBotApiKey

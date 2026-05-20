@@ -41,7 +41,7 @@ Get-Content -LiteralPath $envFilePath | ForEach-Object {
     Set-Item -Path ("Env:{0}" -f $key) -Value $value
 }
 
-$requiredEnvVars = @("TOKEN", "CLIENT_SECRET", "SLACK_WEBHOOK_URL")
+$requiredEnvVars = @("TOKEN", "CLIENT_SECRET", "SLACK_WEBHOOK_URL", "HOME_WIFI_SSID")
 $missingVars = @()
 foreach ($requiredKey in $requiredEnvVars) {
     if ([string]::IsNullOrWhiteSpace((Get-Item -Path ("Env:{0}" -f $requiredKey) -ErrorAction SilentlyContinue).Value)) {
@@ -108,14 +108,48 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host ""
+Write-Host "在宅状態パラメータを確認しています..."
+
+$wifiSsidParamName = "/$stackName/WIFI_SSID"
+$wifiSsidInitialValue = '{"at_home":false,"updated_at":null}'
+$wifiParamCheckOutput = (& aws ssm get-parameter `
+    --name $wifiSsidParamName `
+    --region $awsRegion `
+    --profile $awsProfile 2>&1)
+
+if ($LASTEXITCODE -ne 0) {
+    if (($wifiParamCheckOutput -join "`n") -match "ParameterNotFound") {
+        Write-Host "在宅状態パラメータを初期作成します: $wifiSsidParamName"
+        & aws ssm put-parameter `
+            --name $wifiSsidParamName `
+            --value $wifiSsidInitialValue `
+            --type "SecureString" `
+            --region $awsRegion `
+            --profile $awsProfile 2>&1 | Out-Host
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "在宅状態パラメータの初期作成に失敗しました: $wifiSsidParamName"
+        }
+    } else {
+        Write-Host ($wifiParamCheckOutput -join "`n")
+        Write-Error "在宅状態パラメータの確認に失敗しました: $wifiSsidParamName"
+    }
+}
+
+Write-Host ""
 Write-Host "deploying..."
 
 $parameterOverrides = @(
     "Token=$($env:TOKEN)",
     "ClientSecret=$($env:CLIENT_SECRET)",
     "SlackWebhookUrl=$($env:SLACK_WEBHOOK_URL)",
-    "SwitchBotApiBaseUrl=$switchBotApiBaseUrl"
+    "SwitchBotApiBaseUrl=$switchBotApiBaseUrl",
+    "HomeWifiSsid=$($env:HOME_WIFI_SSID)"
 )
+
+if (-not [string]::IsNullOrWhiteSpace($env:API_KEY)) {
+    $parameterOverrides += "ApiKeyValue=$($env:API_KEY)"
+}
 
 & sam deploy `
     --stack-name $stackName `
@@ -129,6 +163,50 @@ $parameterOverrides = @(
 if ($LASTEXITCODE -ne 0) {
     Write-Error "デプロイに失敗しました。"
 }
+
+Write-Host ""
+Write-Host "API Gateway 情報を取得しています..."
+
+$stackOutputsJson = (& aws cloudformation describe-stacks `
+    --stack-name $stackName `
+    --region $awsRegion `
+    --profile $awsProfile `
+    --query "Stacks[0].Outputs" `
+    --output json 2>&1)
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ($stackOutputsJson -join "`n")
+    Write-Error "スタック出力の取得に失敗しました。"
+}
+
+$stackOutputs = $stackOutputsJson | ConvertFrom-Json
+$apiKeyId = ($stackOutputs | Where-Object { $_.OutputKey -eq "SwitchBotApiKeyId" }).OutputValue
+$wifiEndpoint = ($stackOutputs | Where-Object { $_.OutputKey -eq "SwitchBotWifiEndpoint" }).OutputValue
+
+if ([string]::IsNullOrWhiteSpace($apiKeyId)) {
+    Write-Error "SwitchBotApiKeyId の出力が見つかりません。"
+}
+
+$apiKeyValueOutput = (& aws apigateway get-api-key `
+    --api-key $apiKeyId `
+    --include-value `
+    --region $awsRegion `
+    --profile $awsProfile `
+    --query "value" `
+    --output text 2>&1)
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ($apiKeyValueOutput -join "`n")
+    Write-Error "API キー値の取得に失敗しました。"
+}
+
+Write-Host ""
+Write-Host "API Gateway 設定:"
+Write-Host "  WiFi endpoint: $wifiEndpoint"
+Write-Host "  API key (x-api-key): $apiKeyValueOutput"
+Write-Host ""
+Write-Host "呼び出し例:"
+Write-Host ('  curl -X POST "' + $wifiEndpoint + '" -H "x-api-key: ' + $apiKeyValueOutput + '" -H "Content-Type: application/json" -d "{\"ssid\":\"YOUR_SSID\"}"')
 
 Write-Host ""
 Write-Host ("デプロイ完了: " + (Get-Date -Format "yyyy-MM-dd HH:mm:ss"))

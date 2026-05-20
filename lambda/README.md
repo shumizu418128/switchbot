@@ -1,61 +1,63 @@
-# SwitchBot Lock Lambda
+# SwitchBot Lambda
 
-SwitchBot OpenAPI v1.1 経由でスマートロックに **施錠コマンド（`lock`）** を送る **AWS Lambda** 用コードです。呼び出し側は共有秘密（`x-api-key`）で保護し、**対象デバイス ID はリクエストごとに指定**します。
-
-## 仕様の要点（旧版からの変更）
-
-- **デバイス ID**: 環境変数の固定 ID は使わず、イベントの `device_id` で指定する。
-- **施錠フロー**: 事前にデバイス状態を取得して「施錠済みならスキップ」は行わない。SwitchBot に `lock` コマンドを送るのみ。
-- **認証**: ヘッダー `x-api-key` が環境変数 `API_KEY` と一致すること。
+SwitchBot OpenAPI v1.1 経由の CO2 センサー監視と、API Gateway 経由の WiFi 在宅判定を行う **AWS Lambda** 用コードです。
 
 ## 動作
 
-1. ヘッダー `x-api-key` を検証する（不一致・未設定は拒否）。
-2. イベントに `device_id` があるか確認する（なければエラー）。
-3. `action` が `"lock"` のときだけ、`/v1.1/devices/{device_id}/commands` に施錠コマンドを POST する。
-4. 成功時は SwitchBot API の JSON 応答をそのまま返す。
-
-ハブとロックが SwitchBot アプリ上で連携済みであり、Open Token / Secret が有効であることが前提です。
+- **スケジュール（5分ごと）**: CO2・湿度をチェックし、閾値超過時に Slack へ通知（SSM で通知状態を管理）
+- **POST `/wifi`**: JSON の `ssid` を家の SSID（`HOME_WIFI_SSID`）と比較し、在宅状態が変化したときだけフック処理後に SSM へ `at_home` を保存（API Gateway の API Key 必須）
 
 ## 環境変数
 
 | 変数名 | 必須 | 説明 |
 |--------|------|------|
-| `API_KEY` | はい | 呼び出し側が送る固定 API キー（十分に長いランダム文字列を推奨） |
-| `SWITCHBOT_TOKEN` | はい | SwitchBot アプリの Open Token |
-| `SWITCHBOT_SECRET` | はい | SwitchBot アプリの Secret |
+| `TOKEN` | はい | SwitchBot Open Token |
+| `CLIENT_SECRET` | はい | SwitchBot Secret |
+| `SLACK_WEBHOOK_URL` | はい | Slack Incoming Webhook URL |
+| `HOME_WIFI_SSID` | はい | 家の WiFi SSID（在宅判定用） |
 | `SWITCHBOT_API_BASE_URL` | いいえ | 省略時 `https://api.switch-bot.com` |
+| `ALERT_STATE_PARAM` | デプロイ時設定 | CO2 通知状態の SSM パラメータ名 |
+| `WIFI_STATE_PARAM` | デプロイ時設定 | 在宅状態の SSM パラメータ名 |
 
-## イベント（入力）形式
+## SSM（在宅状態）
 
-ハンドラーは **イベントオブジェクトのトップレベル**から次を読みます。
+`WIFI_STATE_PARAM` に保存する JSON 例:
+
+```json
+{"at_home": false, "updated_at": 1710000000}
+```
+
+## API（`/wifi`）
 
 | フィールド | 必須 | 説明 |
 |------------|------|------|
-| `headers` | 実質必須 | `x-api-key` を含む（大文字小文字の扱いは Lambda のイベント実装に依存） |
-| `device_id` | はい | 対象スマートロックのデバイス ID |
-| `action` | はい | `"lock"` のときのみ施錠を実行 |
+| `ssid` | はい | 現在接続中の WiFi SSID（JSON ボディ） |
 
-`action` が `"lock"` 以外、または `device_id` が無い場合は HTTP 相当のエラー用ボディ（例: `400` と JSON）を返します。
+成功時レスポンス例:
 
-**Lambda Function URL / API Gateway** で JSON ボディに `device_id` や `action` を載せる場合は、統合側でイベントのトップレベルにマッピングするか、ハンドラー側で `body` を JSON パースする処理を追加する必要があります（標準の HTTP プロキシイベントではこれらはボディ文字列内にあります）。
+```json
+{"ok": true, "at_home": true}
+```
+
+認証は API Gateway の `x-api-key` ヘッダーです。
+
+在宅状態が変化したとき、`switchbot_client.py` の `on_arrived_home` / `on_left_home` が呼ばれます（実装は各自で追加）。
+
+## コード構成
+
+| モジュール | 役割 |
+|------------|------|
+| `router.py` | Lambda エントリ・イベント種別の判定（スケジュール / API Gateway） |
+| `routes/schedule.py` | 定期実行タスク（`SCHEDULE_HANDLERS` に action を登録） |
+| `routes/api.py` | HTTP API（`API_ROUTES` にパスを登録） |
+| `api_http.py` | API Gateway 用の body パース・レスポンス組み立て |
+
+新機能追加時は、スケジュールなら `routes/schedule.py`、HTTP API なら `routes/api.py` と `template.yaml` に追記する。
 
 ## Lambda の設定
 
-- **ハンドラー**: `handler.lambda_handler`（デプロイ zip のルートに `handler.py` と `switchbot_client.py` を置く場合）
-  **`src` をルートに含める構成**の場合は `src.handler.lambda_handler` に合わせ、ランタイムの作業ディレクトリ／モジュールパスが `switchbot_client` を解決できるようにしてください。
-- **ランタイム**: Python 3.11 以上（`pyproject.toml` の `requires-python` に準拠）
-- **依存**: 標準ライブラリのみのため、追加パッケージの同梱は不要です。
-
-デプロイ zip の例（`src` 構成のとき）:
-
-```
-deployment.zip
-  src/
-    __init__.py
-    handler.py
-    switchbot_client.py
-```
+- **ハンドラー**: `router.dispatch`
+- **ランタイム**: Python 3.13（`pyproject.toml` の `requires-python` に準拠）
 
 ## 開発（テスト）
 

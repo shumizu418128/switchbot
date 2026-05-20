@@ -11,7 +11,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
-from typing import Any, Literal
+from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
@@ -21,9 +21,6 @@ if os.getenv("ENV") == "local":
 
     load_dotenv()
 
-# Lambda JSON ボディで返す結果コード
-ResultCode = Literal["locked", "already_locked"]
-
 # SwitchBot API の成功コード（公式ドキュメント）
 SWITCHBOT_API_SUCCESS_STATUS = 100
 
@@ -31,6 +28,8 @@ TOKEN = os.environ.get("TOKEN", "").strip()
 SECRET = os.environ.get("CLIENT_SECRET", "").strip()
 SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "").strip()
 ALERT_STATE_PARAM = os.environ.get("ALERT_STATE_PARAM", "").strip()
+WIFI_STATE_PARAM = os.environ.get("WIFI_STATE_PARAM", "").strip()
+HOME_WIFI_SSID = os.environ.get("HOME_WIFI_SSID", "").strip()
 
 API_BASE_URL = os.environ.get(
     "SWITCHBOT_API_BASE_URL", "https://api.switch-bot.com"
@@ -74,6 +73,70 @@ def _put_alert_state(alert_active: bool, alert_type: str | None) -> None:
     ssm_client.put_parameter(
         Name=ALERT_STATE_PARAM, Value=value, Type="SecureString", Overwrite=True
     )
+
+
+def _get_home_presence_state() -> dict[str, Any]:
+    """SSM Parameter Store から在宅状態を取得する。"""
+    if not WIFI_STATE_PARAM:
+        return {"at_home": False, "updated_at": None}
+
+    try:
+        result = ssm_client.get_parameter(Name=WIFI_STATE_PARAM, WithDecryption=True)
+        raw_value = result.get("Parameter", {}).get("Value", "{}")
+        state = json.loads(raw_value)
+    except ssm_client.exceptions.ParameterNotFound:
+        return {"at_home": False, "updated_at": None}
+    except (ClientError, json.JSONDecodeError):
+        return {"at_home": False, "updated_at": None}
+
+    return {
+        "at_home": bool(state.get("at_home", False)),
+        "updated_at": state.get("updated_at"),
+    }
+
+
+def _put_home_presence_state(at_home: bool) -> None:
+    """SSM Parameter Store に在宅状態を保存する。"""
+    if not WIFI_STATE_PARAM:
+        return
+
+    value = json.dumps({"at_home": at_home, "updated_at": int(time.time())})
+    ssm_client.put_parameter(
+        Name=WIFI_STATE_PARAM, Value=value, Type="SecureString", Overwrite=True
+    )
+
+
+def on_arrived_home() -> None:
+    """在宅状態が false から true に変化したときに呼ばれる。"""
+    pass
+
+
+def on_left_home() -> None:
+    """在宅状態が true から false に変化したときに呼ばれる。"""
+    pass
+
+
+def update_home_presence_from_ssid(ssid: str) -> bool:
+    """受信 SSID と家 SSID を比較し、在宅状態の変化時に処理して保存する。
+
+    Args:
+        ssid: クライアントから報告された WiFi SSID。
+
+    Returns:
+        現在の在宅判定（家 SSID と一致すれば ``True``）。
+    """
+    at_home = bool(HOME_WIFI_SSID) and ssid == HOME_WIFI_SSID
+    state = _get_home_presence_state()
+    was_at_home = bool(state.get("at_home", False))
+
+    if at_home and not was_at_home:
+        on_arrived_home()
+        _put_home_presence_state(True)
+    elif not at_home and was_at_home:
+        on_left_home()
+        _put_home_presence_state(False)
+
+    return at_home
 
 
 class SwitchBotError(Exception):
@@ -184,24 +247,6 @@ def _request_json(
             response_body=payload,
         )
     return payload
-
-
-def lock(device_id: str) -> dict[str, Any]:
-    """施錠コマンドを送信する。
-
-    Args:
-        device_id: 対象スマートロックのデバイス ID。
-
-    Returns:
-        API 応答全体。
-    """
-    path = f"/v1.1/devices/{device_id}/commands"
-    body = {
-        "commandType": "command",
-        "command": "lock",
-        "parameter": "default",
-    }
-    return _request_json("POST", path, body)
 
 
 def co2_check():
