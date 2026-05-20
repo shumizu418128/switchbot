@@ -61,7 +61,27 @@ def on_arrived_home() -> None:
 
 def on_left_home() -> None:
     """在宅状態が true から false に変化したときに呼ばれる。"""
-    print("on_left_home: test message", flush=True)
+    light_device_id = "01-202604181058-79179070"
+    path = f"/v1.1/devices/{light_device_id}/commands"
+    request_json(
+        "POST",
+        path,
+        {
+            "commandType": "customize",
+            "command": "保安灯",
+            "parameter": "default",
+        },
+    )
+    request_json(
+        "POST",
+        path,
+        {
+            "commandType": "command",
+            "command": "turnOn",
+            "parameter": "default",
+        },
+    )
+    print("on_left_home", flush=True)
 
 
 WIFI_EVENT_CONNECTED = "wifi_connected"
@@ -193,3 +213,8 @@ def co2_check() -> None:
 
     if alert_type is None and was_alert_active:
         _put_alert_state(False, None)
+
+
+if __name__ == "__main__":
+    # テスト
+    on_arrived_home()
