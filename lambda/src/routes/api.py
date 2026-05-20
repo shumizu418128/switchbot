@@ -8,7 +8,7 @@ from typing import Any
 from api_http import http_response, normalize_path, parse_json_body
 from botocore.exceptions import ClientError
 from models import ApiGatewayEvent
-from switchbot_client import update_home_presence_from_ssid
+from switchbot_service import update_home_presence_from_ssid
 
 RouteFn = Callable[[dict[str, Any]], dict[str, Any]]
 

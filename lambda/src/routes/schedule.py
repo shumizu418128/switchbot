@@ -6,7 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from models import ScheduledEvent
-from switchbot_client import co2_check
+from switchbot_service import co2_check
 
 TaskFn = Callable[[], Any]
 
