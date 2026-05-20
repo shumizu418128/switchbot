@@ -9,6 +9,9 @@ Globals:
       - x86_64
     MemorySize: 128
     Timeout: 60
+    Environment:
+      Variables:
+        TZ: Asia/Tokyo
 
 Parameters:
   Token:
