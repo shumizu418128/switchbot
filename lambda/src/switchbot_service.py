@@ -72,6 +72,7 @@ def on_left_home() -> None:
             "parameter": "default",
         },
     )
+    # 電源はトグルなので、turnOnとあるが電源が既に入っているときはオフになる
     request_json(
         "POST",
         path,
