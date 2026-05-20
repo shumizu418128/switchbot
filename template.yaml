@@ -66,8 +66,8 @@ Resources:
           CLIENT_SECRET: !Ref ClientSecret
           SLACK_WEBHOOK_URL: !Ref SlackWebhookUrl
           SWITCHBOT_API_BASE_URL: !Ref SwitchBotApiBaseUrl
-          ALERT_STATE_PARAM: !Sub CO2_ALERT_STATE
-          WIFI_STATE_PARAM: !Sub WIFI_SSID
+          ALERT_STATE_PARAM: !Sub /${AWS::StackName}/CO2_ALERT_STATE
+          WIFI_STATE_PARAM: !Sub /${AWS::StackName}/WIFI_SSID
           HOME_WIFI_SSID: !Ref HomeWifiSsid
       Events:
         FiveMinuteSchedule:
