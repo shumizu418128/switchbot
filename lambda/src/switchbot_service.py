@@ -82,6 +82,19 @@ def on_left_home() -> None:
             "parameter": "default",
         },
     )
+
+    ac_device_id = "01-202604181122-42030637"
+    path = f"/v1.1/devices/{ac_device_id}/commands"
+    request_json(
+        "POST",
+        path,
+        {
+            "commandType": "command",
+            "command": "turnOff",
+            "parameter": "default",
+        },
+    )
+
     print("on_left_home", flush=True)
 
 
