@@ -63,15 +63,35 @@ def on_left_home() -> None:
     """在宅状態が true から false に変化したときに呼ばれる。"""
     light_device_id = "01-202604181058-79179070"
     path = f"/v1.1/devices/{light_device_id}/commands"
+    # 電源はトグルなので、turnOnとあるが電源が既に入っているときはオフになる
     request_json(
         "POST",
         path,
         {
             "commandType": "customize",
-            "command": "保安灯",
+            "command": "turnOn",
             "parameter": "default",
         },
     )
+    # ここでhub2にアクセスして、光量を確認
+    hub2_device_id = "01-202604181035-34698213"
+    path = f"/v1.1/devices/{hub2_device_id}/status"
+    hub2_status = request_json("GET", path)
+
+    # "brightness" がしきい値以上かどうかを確認
+    shikii_brightness = 70  # 例: しきい値 70
+    brightness = hub2_status.get("body", {}).get("brightness")
+    if brightness is not None and brightness >= shikii_brightness:
+        # しきい値以上であればもう一度コマンドを送信
+        request_json(
+            "POST",
+            path.replace("status", "commands"),
+            {
+                "commandType": "customize",
+                "command": "turnOn",
+                "parameter": "default",
+            },
+        )
     # 電源はトグルなので、turnOnとあるが電源が既に入っているときはオフになる
     request_json(
         "POST",
