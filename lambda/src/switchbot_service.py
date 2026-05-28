@@ -60,6 +60,8 @@ def on_arrived_home() -> None:
 
 
 def on_left_home() -> None:
+    return
+    # バグを見つけたので暫定対応として停止
     """在宅状態が true から false に変化したときに呼ばれる。"""
     light_device_id = "01-202604181058-79179070"
     path = f"/v1.1/devices/{light_device_id}/commands"
