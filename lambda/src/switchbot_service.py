@@ -60,9 +60,22 @@ def on_arrived_home() -> None:
 
 
 def on_left_home() -> None:
-    return
-    # バグを見つけたので暫定対応として停止
     """在宅状態が true から false に変化したときに呼ばれる。"""
+    ac_device_id = "01-202604181122-42030637"
+    path = f"/v1.1/devices/{ac_device_id}/commands"
+    # エアコンを停止
+    request_json(
+        "POST",
+        path,
+        {
+            "commandType": "command",
+            "command": "turnOff",
+            "parameter": "default",
+        },
+    )
+    return
+
+    # バグを見つけたので暫定対応として停止
     light_device_id = "01-202604181058-79179070"
     path = f"/v1.1/devices/{light_device_id}/commands"
     request_json(
@@ -81,18 +94,6 @@ def on_left_home() -> None:
         {
             "commandType": "command",
             "command": "turnOn",
-            "parameter": "default",
-        },
-    )
-
-    ac_device_id = "01-202604181122-42030637"
-    path = f"/v1.1/devices/{ac_device_id}/commands"
-    request_json(
-        "POST",
-        path,
-        {
-            "commandType": "command",
-            "command": "turnOff",
             "parameter": "default",
         },
     )
