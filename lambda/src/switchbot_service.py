@@ -296,7 +296,7 @@ def lock_check() -> None:
         status = "\n" + "\n".join(status_parts)
 
         slack_message = {
-            "text": f"<@U099ANR7PL7> :rotating_light: *警告: ドアが開いています*{status}"
+            "text": f"<@U099ANR7PL7> :rotating_light: :door: :warning: *警告: ドアが開いています* :lock: {status}"
         }
 
         data = json.dumps(slack_message).encode("utf-8")
