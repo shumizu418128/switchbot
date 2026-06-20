@@ -74,16 +74,14 @@ def on_left_home() -> None:
             "parameter": "default",
         },
     )
-    return
 
-    # バグを見つけたので暫定対応として停止
     path = f"/v1.1/devices/{DeviceId.LIGHT}/commands"
     request_json(
         "POST",
         path,
         {
             "commandType": "customize",
-            "command": "保安灯",
+            "command": "全灯",
             "parameter": "default",
         },
     )
@@ -319,4 +317,4 @@ def lock_check() -> None:
 
 if __name__ == "__main__":
     # テスト
-    lock_check()
+    on_left_home()
