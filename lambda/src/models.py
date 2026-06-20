@@ -44,3 +44,14 @@ class LambdaContext:
     aws_request_id: str
     log_group_name: str
     log_stream_name: str
+
+
+class DeviceId:
+    CO2 = "B0E9FEA40541"
+    ROBOT_VACUUM_CLEANER = "B0E9FEECD4E5"
+    HUB2 = "D43721EE3871"
+    INTERCOM_UNLOCK1 = "E77601466164"
+    INTERCOM_UNLOCK2 = "ED2EC4864E76"
+    SMART_LOCK = "F75F1FF0F6AA"
+    LIGHT = "01-202604181058-79179070"
+    AIR_CONDITIONER = "01-202604181122-42030637"

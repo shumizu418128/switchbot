@@ -10,10 +10,12 @@ from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
+from models import DeviceId
 from switchbot_client import request_json
 
 SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "").strip()
 ALERT_STATE_PARAM = os.environ.get("ALERT_STATE_PARAM", "").strip()
+LOCK_ALERT_STATE_PARAM = os.environ.get("LOCK_ALERT_STATE_PARAM", "").strip()
 WIFI_STATE_PARAM = os.environ.get("WIFI_STATE_PARAM", "").strip()
 HOME_WIFI_SSID = os.environ.get("HOME_WIFI_SSID", "").strip()
 
@@ -61,8 +63,7 @@ def on_arrived_home() -> None:
 
 def on_left_home() -> None:
     """在宅状態が true から false に変化したときに呼ばれる。"""
-    ac_device_id = "01-202604181122-42030637"
-    path = f"/v1.1/devices/{ac_device_id}/commands"
+    path = f"/v1.1/devices/{DeviceId.AIR_CONDITIONER}/commands"
     # エアコンを停止
     request_json(
         "POST",
@@ -76,8 +77,7 @@ def on_left_home() -> None:
     return
 
     # バグを見つけたので暫定対応として停止
-    light_device_id = "01-202604181058-79179070"
-    path = f"/v1.1/devices/{light_device_id}/commands"
+    path = f"/v1.1/devices/{DeviceId.LIGHT}/commands"
     request_json(
         "POST",
         path,
@@ -179,8 +179,7 @@ def _put_alert_state(alert_active: bool, alert_type: str | None) -> None:
 
 def co2_check() -> None:
     """CO2濃度をチェックする。"""
-    co2_device_id = "B0E9FEA40541"
-    path = f"/v1.1/devices/{co2_device_id}/status"
+    path = f"/v1.1/devices/{DeviceId.CO2}/status"
 
     response = request_json("GET", path)
     body = response.get("body", {})
@@ -211,10 +210,15 @@ def co2_check() -> None:
             slack_message = {
                 "text": f"<@U099ANR7PL7> :rotating_light: *警告: CO2濃度が{co2_threshold}ppmを超えました*{status}"
             }
-        else:
-            slack_message = {
-                "text": f"<@U099ANR7PL7> :rotating_light: *警告: 湿度が{humidity_min_threshold}%～{humidity_max_threshold}%を超えました*{status}"
-            }
+        elif alert_type == "humidity":
+            if humidity <= humidity_min_threshold:
+                slack_message = {
+                    "text": f"<@U099ANR7PL7> :rotating_light: *警告: 湿度が{humidity_min_threshold}%未満です*{status}"
+                }
+            else:
+                slack_message = {
+                    "text": f"<@U099ANR7PL7> :rotating_light: *警告: 湿度が{humidity_max_threshold}%を超えました*{status}"
+                }
 
         data = json.dumps(slack_message).encode("utf-8")
         req = urllib.request.Request(
@@ -232,6 +236,87 @@ def co2_check() -> None:
         _put_alert_state(False, None)
 
 
+#####################################
+# MARK: - Lock
+#####################################
+def _get_lock_alert_state() -> dict[str, Any]:
+    """SSM Parameter Store から鍵通知状態を取得する。"""
+    if not LOCK_ALERT_STATE_PARAM:
+        return {"alert_active": False, "updated_at": None}
+
+    try:
+        result = ssm_client.get_parameter(
+            Name=LOCK_ALERT_STATE_PARAM, WithDecryption=True
+        )
+        raw_value = result.get("Parameter", {}).get("Value", "{}")
+        state = json.loads(raw_value)
+    except ssm_client.exceptions.ParameterNotFound:
+        return {"alert_active": False, "updated_at": None}
+    except (ClientError, json.JSONDecodeError):
+        return {"alert_active": False, "updated_at": None}
+
+    return {
+        "alert_active": bool(state.get("alert_active", False)),
+        "updated_at": state.get("updated_at"),
+    }
+
+
+def _put_lock_alert_state(alert_active: bool) -> None:
+    """SSM Parameter Store に鍵通知状態を保存する。"""
+    if not LOCK_ALERT_STATE_PARAM:
+        return
+
+    value = json.dumps({"alert_active": alert_active, "updated_at": int(time.time())})
+    ssm_client.put_parameter(
+        Name=LOCK_ALERT_STATE_PARAM, Value=value, Type="SecureString", Overwrite=True
+    )
+
+
+def lock_check() -> None:
+    """スマートロックの解錠・ドア開状態をチェックし、異常時に Slack へ通知する。"""
+    path = f"/v1.1/devices/{DeviceId.SMART_LOCK}/status"
+
+    response = request_json("GET", path)
+    body = response.get("body", {})
+    lock_state = body.get("lockState")
+    door_state = body.get("doorState")
+    battery = body.get("battery")
+
+    is_unlocked = lock_state == "unlocked"
+    is_door_closed = door_state == "closed"
+    should_alert = is_unlocked or not is_door_closed
+
+    state = _get_lock_alert_state()
+    was_alert_active = bool(state.get("alert_active", False))
+
+    if should_alert and not was_alert_active:
+        status_parts = [f"`lockState: {lock_state}`"]
+        if door_state is not None:
+            status_parts.append(f"`doorState: {door_state}`")
+        if battery is not None:
+            status_parts.append(f"`battery: {battery} %`")
+        status = "\n" + "\n".join(status_parts)
+
+        slack_message = {
+            "text": f"<@U099ANR7PL7> :rotating_light: *警告: ドアが開いています*{status}"
+        }
+
+        data = json.dumps(slack_message).encode("utf-8")
+        req = urllib.request.Request(
+            SLACK_WEBHOOK_URL,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req):
+            pass
+
+        _put_lock_alert_state(True)
+
+    if not should_alert and was_alert_active:
+        _put_lock_alert_state(False)
+
+
 if __name__ == "__main__":
     # テスト
-    on_arrived_home()
+    lock_check()

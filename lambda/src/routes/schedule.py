@@ -6,12 +6,18 @@ from collections.abc import Callable
 from typing import Any
 
 from models import ScheduledEvent
-from switchbot_service import co2_check
+from switchbot_service import co2_check, lock_check
 
 TaskFn = Callable[[], Any]
 
+
+def co2_and_lock_check():
+    co2_check()
+    lock_check()
+
+
 SCHEDULE_TASKS: dict[str, TaskFn] = {
-    "co2_check": co2_check,
+    "co2_and_lock_check": co2_and_lock_check,
 }
 
 
