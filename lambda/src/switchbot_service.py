@@ -18,6 +18,7 @@ ALERT_STATE_PARAM = os.environ.get("ALERT_STATE_PARAM", "").strip()
 LOCK_ALERT_STATE_PARAM = os.environ.get("LOCK_ALERT_STATE_PARAM", "").strip()
 WIFI_STATE_PARAM = os.environ.get("WIFI_STATE_PARAM", "").strip()
 HOME_WIFI_SSID = os.environ.get("HOME_WIFI_SSID", "").strip()
+HUMIDITY_ALERT_COOLDOWN_SECONDS = 3600
 
 ssm_client = boto3.client("ssm")
 
@@ -140,34 +141,64 @@ def update_home_presence_from_ssid(event: str, ssid: str | None = None) -> bool:
 def _get_alert_state() -> dict[str, Any]:
     """SSM Parameter Store から通知状態を取得する。"""
     if not ALERT_STATE_PARAM:
-        return {"alert_active": False, "last_alert_type": None, "updated_at": None}
+        return {
+            "alert_active": False,
+            "last_alert_type": None,
+            "updated_at": None,
+            "last_humidity_alert_at": None,
+        }
 
     try:
         result = ssm_client.get_parameter(Name=ALERT_STATE_PARAM, WithDecryption=True)
         raw_value = result.get("Parameter", {}).get("Value", "{}")
         state = json.loads(raw_value)
     except ssm_client.exceptions.ParameterNotFound:
-        return {"alert_active": False, "last_alert_type": None, "updated_at": None}
+        return {
+            "alert_active": False,
+            "last_alert_type": None,
+            "updated_at": None,
+            "last_humidity_alert_at": None,
+        }
     except (ClientError, json.JSONDecodeError):
-        return {"alert_active": False, "last_alert_type": None, "updated_at": None}
+        return {
+            "alert_active": False,
+            "last_alert_type": None,
+            "updated_at": None,
+            "last_humidity_alert_at": None,
+        }
 
+    last_humidity_alert_at = state.get("last_humidity_alert_at")
     return {
         "alert_active": bool(state.get("alert_active", False)),
         "last_alert_type": state.get("last_alert_type"),
         "updated_at": state.get("updated_at"),
+        "last_humidity_alert_at": (
+            int(last_humidity_alert_at) if last_humidity_alert_at is not None else None
+        ),
     }
 
 
-def _put_alert_state(alert_active: bool, alert_type: str | None) -> None:
+def _put_alert_state(
+    alert_active: bool,
+    alert_type: str | None,
+    *,
+    last_humidity_alert_at: int | None = None,
+) -> None:
     """SSM Parameter Store に通知状態を保存する。"""
     if not ALERT_STATE_PARAM:
         return
 
+    current = _get_alert_state()
     value = json.dumps(
         {
             "alert_active": alert_active,
             "last_alert_type": alert_type,
             "updated_at": int(time.time()),
+            "last_humidity_alert_at": (
+                last_humidity_alert_at
+                if last_humidity_alert_at is not None
+                else current.get("last_humidity_alert_at")
+            ),
         }
     )
     ssm_client.put_parameter(
@@ -199,6 +230,14 @@ def co2_check() -> None:
     state = _get_alert_state()
     was_alert_active = bool(state.get("alert_active", False))
 
+    if alert_type == "humidity":
+        last_humidity_alert_at = state.get("last_humidity_alert_at")
+        if (
+            last_humidity_alert_at is not None
+            and time.time() - last_humidity_alert_at < HUMIDITY_ALERT_COOLDOWN_SECONDS
+        ):
+            alert_type = None
+
     if alert_type is not None and not was_alert_active:
         status = (
             f"\n`{co2} ppm`\n`{temperature} ℃`\n`{humidity} %`\n`battery: {battery} %`"
@@ -228,7 +267,13 @@ def co2_check() -> None:
         with urllib.request.urlopen(req):
             pass
 
-        _put_alert_state(True, alert_type)
+        _put_alert_state(
+            True,
+            alert_type,
+            last_humidity_alert_at=(
+                int(time.time()) if alert_type == "humidity" else None
+            ),
+        )
 
     if alert_type is None and was_alert_active:
         _put_alert_state(False, None)
