@@ -108,6 +108,35 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host ""
+Write-Host "湿度履歴パラメータを確認しています..."
+
+$humidityHistoryParamName = "/$stackName/HUMIDITY_HISTORY"
+$humidityHistoryInitialValue = '[]'
+$humidityHistoryParamCheckOutput = (& aws ssm get-parameter `
+    --name $humidityHistoryParamName `
+    --region $awsRegion `
+    --profile $awsProfile 2>&1)
+
+if ($LASTEXITCODE -ne 0) {
+    if (($humidityHistoryParamCheckOutput -join "`n") -match "ParameterNotFound") {
+        Write-Host "湿度履歴パラメータを初期作成します: $humidityHistoryParamName"
+        & aws ssm put-parameter `
+            --name $humidityHistoryParamName `
+            --value $humidityHistoryInitialValue `
+            --type "String" `
+            --region $awsRegion `
+            --profile $awsProfile 2>&1 | Out-Host
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "湿度履歴パラメータの初期作成に失敗しました: $humidityHistoryParamName"
+        }
+    } else {
+        Write-Host ($humidityHistoryParamCheckOutput -join "`n")
+        Write-Error "湿度履歴パラメータの確認に失敗しました: $humidityHistoryParamName"
+    }
+}
+
+Write-Host ""
 Write-Host "在宅状態パラメータを確認しています..."
 
 $wifiSsidParamName = "/$stackName/WIFI_SSID"

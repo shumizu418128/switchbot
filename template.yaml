@@ -64,6 +64,7 @@ Resources:
                 - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/CO2_ALERT_STATE
                 - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/LOCK_ALERT_STATE
                 - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/WIFI_SSID
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/HUMIDITY_HISTORY
       Environment:
         Variables:
           TOKEN: !Ref Token
@@ -73,6 +74,7 @@ Resources:
           ALERT_STATE_PARAM: !Sub /${AWS::StackName}/CO2_ALERT_STATE
           LOCK_ALERT_STATE_PARAM: !Sub /${AWS::StackName}/LOCK_ALERT_STATE
           WIFI_STATE_PARAM: !Sub /${AWS::StackName}/WIFI_SSID
+          HUMIDITY_HISTORY_PARAM: !Sub /${AWS::StackName}/HUMIDITY_HISTORY
           HOME_WIFI_SSID: !Ref HomeWifiSsid
       Events:
         FiveMinuteSchedule:

@@ -18,7 +18,9 @@ ALERT_STATE_PARAM = os.environ.get("ALERT_STATE_PARAM", "").strip()
 LOCK_ALERT_STATE_PARAM = os.environ.get("LOCK_ALERT_STATE_PARAM", "").strip()
 WIFI_STATE_PARAM = os.environ.get("WIFI_STATE_PARAM", "").strip()
 HOME_WIFI_SSID = os.environ.get("HOME_WIFI_SSID", "").strip()
+HUMIDITY_HISTORY_PARAM = os.environ.get("HUMIDITY_HISTORY_PARAM", "").strip()
 HUMIDITY_ALERT_COOLDOWN_SECONDS = 3600
+HUMIDITY_WINDOW_SECONDS = 3600
 
 ssm_client = boto3.client("ssm")
 
@@ -136,6 +138,74 @@ def update_home_presence_from_ssid(event: str, ssid: str | None = None) -> bool:
 
 
 #####################################
+# MARK: - Humidity history
+#####################################
+def _get_humidity_history() -> list[dict[str, Any]]:
+    """SSM Parameter Store から湿度履歴を取得する。
+
+    Returns:
+        ``{"value": float, "timestamp": int}`` のリスト。取得失敗時は空リスト。
+    """
+    if not HUMIDITY_HISTORY_PARAM:
+        return []
+
+    try:
+        result = ssm_client.get_parameter(
+            Name=HUMIDITY_HISTORY_PARAM, WithDecryption=True
+        )
+        raw_value = result.get("Parameter", {}).get("Value", "[]")
+        history = json.loads(raw_value)
+        if isinstance(history, list):
+            return history
+    except ssm_client.exceptions.ParameterNotFound:
+        return []
+    except (ClientError, json.JSONDecodeError):
+        return []
+
+    return []
+
+
+def _put_humidity_history(history: list[dict[str, Any]]) -> None:
+    """SSM Parameter Store に湿度履歴を保存する。
+
+    Args:
+        history: ``{"value": float, "timestamp": int}`` のリスト。
+    """
+    if not HUMIDITY_HISTORY_PARAM:
+        return
+
+    value = json.dumps(history)
+    ssm_client.put_parameter(
+        Name=HUMIDITY_HISTORY_PARAM, Value=value, Type="String", Overwrite=True
+    )
+
+
+def _update_humidity_history(current_value: float) -> float:
+    """湿度履歴に新しい値を追加し、1時間以内の平均値を返す。
+
+    古いエントリ（HUMIDITY_WINDOW_SECONDS 超過）を自動で削除してから保存する。
+
+    Args:
+        current_value: 現在の湿度（%）。
+
+    Returns:
+        過去1時間の湿度平均値（%）。
+    """
+    history = _get_humidity_history()
+
+    now = int(time.time())
+    cutoff = now - HUMIDITY_WINDOW_SECONDS
+
+    history = [entry for entry in history if entry.get("timestamp", 0) >= cutoff]
+    history.append({"value": current_value, "timestamp": now})
+
+    _put_humidity_history(history)
+
+    values = [entry["value"] for entry in history]
+    return sum(values) / len(values)
+
+
+#####################################
 # MARK: - CO2
 #####################################
 def _get_alert_state() -> dict[str, Any]:
@@ -217,6 +287,8 @@ def co2_check() -> None:
     humidity = body.get("humidity")
     battery = body.get("battery")
 
+    avg_humidity = _update_humidity_history(humidity)
+
     co2_threshold = 1000
     humidity_min_threshold = 40
     humidity_max_threshold = 60
@@ -224,7 +296,9 @@ def co2_check() -> None:
     alert_type: str | None = None
     if co2 >= co2_threshold:
         alert_type = "co2"
-    elif humidity <= humidity_min_threshold or humidity >= humidity_max_threshold:
+    elif (
+        avg_humidity <= humidity_min_threshold or avg_humidity >= humidity_max_threshold
+    ):
         alert_type = "humidity"
 
     state = _get_alert_state()
@@ -239,16 +313,15 @@ def co2_check() -> None:
             alert_type = None
 
     if alert_type is not None and not was_alert_active:
-        status = (
-            f"\n`{co2} ppm`\n`{temperature} ℃`\n`{humidity} %`\n`battery: {battery} %`"
-        )
+        avg_humidity_rounded = round(avg_humidity, 1)
+        status = f"\n`{co2} ppm`\n`{temperature} ℃`\n`{avg_humidity_rounded} %（1時間平均）`\n`battery: {battery} %`"
 
         if alert_type == "co2":
             slack_message = {
                 "text": f"<@U099ANR7PL7> :rotating_light: *警告: CO2濃度が{co2_threshold}ppmを超えました*{status}"
             }
         elif alert_type == "humidity":
-            if humidity <= humidity_min_threshold:
+            if avg_humidity <= humidity_min_threshold:
                 slack_message = {
                     "text": f"<@U099ANR7PL7> :rotating_light: *警告: 湿度が{humidity_min_threshold}%未満です*{status}"
                 }
