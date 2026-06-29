@@ -82,7 +82,7 @@ Write-Host "通知状態パラメータを確認しています..."
 
 $switchBotApiBaseUrl = if ([string]::IsNullOrWhiteSpace($env:SWITCHBOT_API_BASE_URL)) { "https://api.switch-bot.com" } else { $env:SWITCHBOT_API_BASE_URL }
 $co2AlertStateParamName = "/$stackName/CO2_ALERT_STATE"
-$co2AlertStateInitialValue = '{"alert_active":false,"last_alert_type":null,"updated_at":null,"last_humidity_alert_at":null}'
+$co2AlertStateInitialValue = '{"alert_active":false,"last_alert_type":null,"updated_at":null,"humidity_alert_active":false}'
 $co2ParamCheckOutput = (& aws ssm get-parameter `
     --name $co2AlertStateParamName `
     --region $awsRegion `

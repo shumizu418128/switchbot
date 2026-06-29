@@ -19,7 +19,7 @@ LOCK_ALERT_STATE_PARAM = os.environ.get("LOCK_ALERT_STATE_PARAM", "").strip()
 WIFI_STATE_PARAM = os.environ.get("WIFI_STATE_PARAM", "").strip()
 HOME_WIFI_SSID = os.environ.get("HOME_WIFI_SSID", "").strip()
 HUMIDITY_HISTORY_PARAM = os.environ.get("HUMIDITY_HISTORY_PARAM", "").strip()
-HUMIDITY_ALERT_COOLDOWN_SECONDS = 3600
+HUMIDITY_CHECK_INTERVAL_SECONDS = 3600
 HUMIDITY_WINDOW_SECONDS = 3600
 
 ssm_client = boto3.client("ssm")
@@ -207,6 +207,20 @@ def _update_humidity_history(current_value: float) -> float:
     return sum(values) / len(values)
 
 
+def _should_run_humidity_check() -> bool:
+    """前回の湿度チェックから HUMIDITY_CHECK_INTERVAL_SECONDS 以上経過しているか。
+
+    Returns:
+        湿度チェックを実行すべきなら ``True``。履歴が空のときは初回として ``True``。
+    """
+    history = _get_humidity_history()
+    if not history:
+        return True
+
+    last_ts = max(entry.get("timestamp", 0) for entry in history)
+    return time.time() - last_ts >= HUMIDITY_CHECK_INTERVAL_SECONDS
+
+
 #####################################
 # MARK: - CO2
 #####################################
@@ -217,7 +231,7 @@ def _get_alert_state() -> dict[str, Any]:
             "alert_active": False,
             "last_alert_type": None,
             "updated_at": None,
-            "last_humidity_alert_at": None,
+            "humidity_alert_active": False,
         }
 
     try:
@@ -229,24 +243,25 @@ def _get_alert_state() -> dict[str, Any]:
             "alert_active": False,
             "last_alert_type": None,
             "updated_at": None,
-            "last_humidity_alert_at": None,
+            "humidity_alert_active": False,
         }
     except (ClientError, json.JSONDecodeError):
         return {
             "alert_active": False,
             "last_alert_type": None,
             "updated_at": None,
-            "last_humidity_alert_at": None,
+            "humidity_alert_active": False,
         }
 
-    last_humidity_alert_at = state.get("last_humidity_alert_at")
+    humidity_alert_active = state.get("humidity_alert_active")
+    if humidity_alert_active is None:
+        humidity_alert_active = state.get("last_humidity_alert_at") is not None
+
     return {
         "alert_active": bool(state.get("alert_active", False)),
         "last_alert_type": state.get("last_alert_type"),
         "updated_at": state.get("updated_at"),
-        "last_humidity_alert_at": (
-            int(last_humidity_alert_at) if last_humidity_alert_at is not None else None
-        ),
+        "humidity_alert_active": bool(humidity_alert_active),
     }
 
 
@@ -254,7 +269,7 @@ def _put_alert_state(
     alert_active: bool,
     alert_type: str | None,
     *,
-    last_humidity_alert_at: int | None = None,
+    humidity_alert_active: bool | None = None,
 ) -> None:
     """SSM Parameter Store に通知状態を保存する。"""
     if not ALERT_STATE_PARAM:
@@ -266,16 +281,33 @@ def _put_alert_state(
             "alert_active": alert_active,
             "last_alert_type": alert_type,
             "updated_at": int(time.time()),
-            "last_humidity_alert_at": (
-                last_humidity_alert_at
-                if last_humidity_alert_at is not None
-                else current.get("last_humidity_alert_at")
+            "humidity_alert_active": (
+                humidity_alert_active
+                if humidity_alert_active is not None
+                else current.get("humidity_alert_active", False)
             ),
         }
     )
     ssm_client.put_parameter(
         Name=ALERT_STATE_PARAM, Value=value, Type="SecureString", Overwrite=True
     )
+
+
+def _send_slack_alert(text: str) -> None:
+    """Slack Incoming Webhook に通知を送る。
+
+    Args:
+        text: 送信するメッセージ本文。
+    """
+    data = json.dumps({"text": text}).encode("utf-8")
+    req = urllib.request.Request(
+        SLACK_WEBHOOK_URL,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req):
+        pass
 
 
 def co2_check() -> None:
@@ -289,69 +321,62 @@ def co2_check() -> None:
     humidity = body.get("humidity")
     battery = body.get("battery")
 
-    avg_humidity = _update_humidity_history(humidity)
-
     co2_threshold = 1000
     humidity_min_threshold = 40
     humidity_max_threshold = 60
 
-    alert_type: str | None = None
-    if co2 >= co2_threshold:
-        alert_type = "co2"
-    elif (
-        avg_humidity <= humidity_min_threshold or avg_humidity >= humidity_max_threshold
-    ):
-        alert_type = "humidity"
-
     state = _get_alert_state()
     was_alert_active = bool(state.get("alert_active", False))
 
-    if alert_type == "humidity":
-        last_humidity_alert_at = state.get("last_humidity_alert_at")
-        if (
-            last_humidity_alert_at is not None
-            and time.time() - last_humidity_alert_at < HUMIDITY_ALERT_COOLDOWN_SECONDS
-        ):
-            alert_type = None
-
-    if alert_type is not None and not was_alert_active:
-        avg_humidity_rounded = round(avg_humidity, 1)
-        status = f"\n`{co2} ppm`\n`{temperature} ℃`\n`{avg_humidity_rounded} %（1時間平均）`\n`battery: {battery} %`"
-
-        if alert_type == "co2":
-            slack_message = {
-                "text": f"<@U099ANR7PL7> :rotating_light: *警告: CO2濃度が{co2_threshold}ppmを超えました*{status}"
-            }
-        elif alert_type == "humidity":
-            if avg_humidity <= humidity_min_threshold:
-                slack_message = {
-                    "text": f"<@U099ANR7PL7> :rotating_light: *警告: 湿度が{humidity_min_threshold}%未満です*{status}"
-                }
-            else:
-                slack_message = {
-                    "text": f"<@U099ANR7PL7> :rotating_light: *警告: 湿度が{humidity_max_threshold}%を超えました*{status}"
-                }
-
-        data = json.dumps(slack_message).encode("utf-8")
-        req = urllib.request.Request(
-            SLACK_WEBHOOK_URL,
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST",
+    if co2 >= co2_threshold and not was_alert_active:
+        status = (
+            f"\n`{co2} ppm`\n`{temperature} ℃`\n`{humidity} %`\n`battery: {battery} %`"
         )
-        with urllib.request.urlopen(req):
-            pass
-
-        _put_alert_state(
-            True,
-            alert_type,
-            last_humidity_alert_at=(
-                int(time.time()) if alert_type == "humidity" else None
-            ),
+        _send_slack_alert(
+            f"<@U099ANR7PL7> :rotating_light: *警告: CO2濃度が{co2_threshold}ppmを超えました*{status}"
         )
+        _put_alert_state(True, "co2")
 
-    if alert_type is None and was_alert_active:
+    if (
+        co2 < co2_threshold
+        and was_alert_active
+        and state.get("last_alert_type") == "co2"
+    ):
         _put_alert_state(False, None)
+
+    if not _should_run_humidity_check():
+        return
+
+    state = _get_alert_state()
+    avg_humidity = _update_humidity_history(humidity)
+    humidity_alert_active = bool(state.get("humidity_alert_active", False))
+    out_of_range = (
+        avg_humidity <= humidity_min_threshold or avg_humidity >= humidity_max_threshold
+    )
+    in_normal_range = humidity_min_threshold < avg_humidity < humidity_max_threshold
+
+    if out_of_range and not humidity_alert_active:
+        avg_humidity_rounded = round(avg_humidity, 1)
+        status = (
+            f"\n`{co2} ppm`\n`{temperature} ℃`\n"
+            f"`{avg_humidity_rounded} %（1時間平均）`\n`battery: {battery} %`"
+        )
+        if avg_humidity <= humidity_min_threshold:
+            alert_text = f"<@U099ANR7PL7> :rotating_light: *警告: 湿度が{humidity_min_threshold}%未満です*{status}"
+        else:
+            alert_text = f"<@U099ANR7PL7> :rotating_light: *警告: 湿度が{humidity_max_threshold}%を超えました*{status}"
+        _send_slack_alert(alert_text)
+        _put_alert_state(
+            bool(state.get("alert_active")),
+            state.get("last_alert_type"),
+            humidity_alert_active=True,
+        )
+    elif in_normal_range and humidity_alert_active:
+        _put_alert_state(
+            bool(state.get("alert_active")),
+            state.get("last_alert_type"),
+            humidity_alert_active=False,
+        )
 
 
 #####################################
