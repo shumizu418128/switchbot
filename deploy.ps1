@@ -41,7 +41,7 @@ Get-Content -LiteralPath $envFilePath | ForEach-Object {
     Set-Item -Path ("Env:{0}" -f $key) -Value $value
 }
 
-$requiredEnvVars = @("TOKEN", "CLIENT_SECRET", "SLACK_WEBHOOK_URL", "HOME_WIFI_SSID")
+$requiredEnvVars = @("TOKEN", "CLIENT_SECRET", "SLACK_WEBHOOK_URL", "SLACK_SIGNING_SECRET", "HOME_WIFI_SSID")
 $missingVars = @()
 foreach ($requiredKey in $requiredEnvVars) {
     if ([string]::IsNullOrWhiteSpace((Get-Item -Path ("Env:{0}" -f $requiredKey) -ErrorAction SilentlyContinue).Value)) {
@@ -166,12 +166,42 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host ""
+Write-Host "鍵通知状態パラメータを確認しています..."
+
+$lockAlertStateParamName = "/$stackName/LOCK_ALERT_STATE"
+$lockAlertStateInitialValue = '{"alert_active":false,"abnormal_since":null,"updated_at":null}'
+$lockParamCheckOutput = (& aws ssm get-parameter `
+    --name $lockAlertStateParamName `
+    --region $awsRegion `
+    --profile $awsProfile 2>&1)
+
+if ($LASTEXITCODE -ne 0) {
+    if (($lockParamCheckOutput -join "`n") -match "ParameterNotFound") {
+        Write-Host "鍵通知状態パラメータを初期作成します: $lockAlertStateParamName"
+        & aws ssm put-parameter `
+            --name $lockAlertStateParamName `
+            --value $lockAlertStateInitialValue `
+            --type "SecureString" `
+            --region $awsRegion `
+            --profile $awsProfile 2>&1 | Out-Host
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "鍵通知状態パラメータの初期作成に失敗しました: $lockAlertStateParamName"
+        }
+    } else {
+        Write-Host ($lockParamCheckOutput -join "`n")
+        Write-Error "鍵通知状態パラメータの確認に失敗しました: $lockAlertStateParamName"
+    }
+}
+
+Write-Host ""
 Write-Host "deploying..."
 
 $parameterOverrides = @(
     "Token=$($env:TOKEN)",
     "ClientSecret=$($env:CLIENT_SECRET)",
     "SlackWebhookUrl=$($env:SLACK_WEBHOOK_URL)",
+    "SlackSigningSecret=$($env:SLACK_SIGNING_SECRET)",
     "SwitchBotApiBaseUrl=$switchBotApiBaseUrl",
     "HomeWifiSsid=$($env:HOME_WIFI_SSID)"
 )
@@ -196,21 +226,21 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host ""
 Write-Host "API Gateway 情報を取得しています..."
 
-$stackOutputsJson = (& aws cloudformation describe-stacks `
+$stackOutputsJson = & aws cloudformation describe-stacks `
     --stack-name $stackName `
     --region $awsRegion `
     --profile $awsProfile `
     --query "Stacks[0].Outputs" `
-    --output json 2>&1)
+    --output json
 
-if ($LASTEXITCODE -ne 0) {
-    Write-Host ($stackOutputsJson -join "`n")
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($stackOutputsJson)) {
     Write-Error "スタック出力の取得に失敗しました。"
 }
 
 $stackOutputs = $stackOutputsJson | ConvertFrom-Json
 $apiKeyId = ($stackOutputs | Where-Object { $_.OutputKey -eq "SwitchBotApiKeyId" }).OutputValue
 $wifiEndpoint = ($stackOutputs | Where-Object { $_.OutputKey -eq "SwitchBotWifiEndpoint" }).OutputValue
+$slackInteractionsEndpoint = ($stackOutputs | Where-Object { $_.OutputKey -eq "SwitchBotSlackInteractionsEndpoint" }).OutputValue
 
 if ([string]::IsNullOrWhiteSpace($apiKeyId)) {
     Write-Error "SwitchBotApiKeyId の出力が見つかりません。"
@@ -232,6 +262,7 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host ""
 Write-Host "API Gateway 設定:"
 Write-Host "  WiFi endpoint: $wifiEndpoint"
+Write-Host "  Slack Interactivity (Request URL): $slackInteractionsEndpoint"
 Write-Host "  API key (x-api-key): $apiKeyValueOutput"
 Write-Host ""
 Write-Host "呼び出し例:"

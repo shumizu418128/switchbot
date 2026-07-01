@@ -23,6 +23,10 @@ Parameters:
   SlackWebhookUrl:
     Type: String
     NoEcho: true
+  SlackSigningSecret:
+    Type: String
+    NoEcho: true
+    Description: Slack App Signing Secret for Interactivity verification.
   SwitchBotApiBaseUrl:
     Type: String
     Default: https://api.switch-bot.com
@@ -70,6 +74,7 @@ Resources:
           TOKEN: !Ref Token
           CLIENT_SECRET: !Ref ClientSecret
           SLACK_WEBHOOK_URL: !Ref SlackWebhookUrl
+          SLACK_SIGNING_SECRET: !Ref SlackSigningSecret
           SWITCHBOT_API_BASE_URL: !Ref SwitchBotApiBaseUrl
           ALERT_STATE_PARAM: !Sub /${AWS::StackName}/CO2_ALERT_STATE
           LOCK_ALERT_STATE_PARAM: !Sub /${AWS::StackName}/LOCK_ALERT_STATE
@@ -92,6 +97,14 @@ Resources:
             Method: post
             Auth:
               ApiKeyRequired: true
+        SlackInteractionsApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref SwitchBotApi
+            Path: /slack/interactions
+            Method: post
+            Auth:
+              ApiKeyRequired: false
 
   SwitchBotApiKey:
     Type: AWS::ApiGateway::ApiKey
@@ -130,6 +143,9 @@ Outputs:
   SwitchBotWifiEndpoint:
     Description: POST endpoint for WiFi SSID save.
     Value: !Sub https://${SwitchBotApi}.execute-api.${AWS::Region}.amazonaws.com/prod/wifi
+  SwitchBotSlackInteractionsEndpoint:
+    Description: POST endpoint for Slack Interactivity (lock button).
+    Value: !Sub https://${SwitchBotApi}.execute-api.${AWS::Region}.amazonaws.com/prod/slack/interactions
   SwitchBotApiKeyId:
     Description: API Gateway API key ID (retrieve value with get-api-key --include-value).
     Value: !Ref SwitchBotApiKey

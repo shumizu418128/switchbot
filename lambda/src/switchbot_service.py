@@ -21,6 +21,7 @@ HOME_WIFI_SSID = os.environ.get("HOME_WIFI_SSID", "").strip()
 HUMIDITY_HISTORY_PARAM = os.environ.get("HUMIDITY_HISTORY_PARAM", "").strip()
 HUMIDITY_CHECK_INTERVAL_SECONDS = 3600
 HUMIDITY_WINDOW_SECONDS = 3600
+LOCK_ALERT_DELAY_SECONDS = 300
 
 ssm_client = boto3.client("ssm")
 
@@ -384,8 +385,9 @@ def co2_check() -> None:
 #####################################
 def _get_lock_alert_state() -> dict[str, Any]:
     """SSM Parameter Store から鍵通知状態を取得する。"""
+    default = {"alert_active": False, "abnormal_since": None, "updated_at": None}
     if not LOCK_ALERT_STATE_PARAM:
-        return {"alert_active": False, "updated_at": None}
+        return default
 
     try:
         result = ssm_client.get_parameter(
@@ -394,29 +396,110 @@ def _get_lock_alert_state() -> dict[str, Any]:
         raw_value = result.get("Parameter", {}).get("Value", "{}")
         state = json.loads(raw_value)
     except ssm_client.exceptions.ParameterNotFound:
-        return {"alert_active": False, "updated_at": None}
+        return default
     except (ClientError, json.JSONDecodeError):
-        return {"alert_active": False, "updated_at": None}
+        return default
 
     return {
         "alert_active": bool(state.get("alert_active", False)),
+        "abnormal_since": state.get("abnormal_since"),
         "updated_at": state.get("updated_at"),
     }
 
 
-def _put_lock_alert_state(alert_active: bool) -> None:
+def _put_lock_alert_state(
+    *,
+    alert_active: bool,
+    abnormal_since: int | None,
+) -> None:
     """SSM Parameter Store に鍵通知状態を保存する。"""
     if not LOCK_ALERT_STATE_PARAM:
         return
 
-    value = json.dumps({"alert_active": alert_active, "updated_at": int(time.time())})
+    value = json.dumps(
+        {
+            "alert_active": alert_active,
+            "abnormal_since": abnormal_since,
+            "updated_at": int(time.time()),
+        }
+    )
     ssm_client.put_parameter(
         Name=LOCK_ALERT_STATE_PARAM, Value=value, Type="SecureString", Overwrite=True
     )
 
 
+def _send_lock_slack_alert(
+    lock_state: Any,
+    door_state: Any,
+    battery: Any,
+) -> None:
+    """鍵異常通知を Block Kit 付きで Slack Incoming Webhook に送る。
+
+    Args:
+        lock_state: SwitchBot の ``lockState``。
+        door_state: SwitchBot の ``doorState``。
+        battery: バッテリー残量（%）。
+    """
+    status_parts = [f"`lockState: {lock_state}`"]
+    if door_state is not None:
+        status_parts.append(f"`doorState: {door_state}`")
+    if battery is not None:
+        status_parts.append(f"`battery: {battery} %`")
+    status = "\n".join(status_parts)
+
+    text = (
+        f"<@U099ANR7PL7> :rotating_light: :door: :warning: "
+        f"*警告: ドアが5分以上開いています* :lock:\n{status}"
+    )
+    slack_message = {
+        "text": text,
+        "blocks": [
+            {"type": "section", "text": {"type": "mrkdwn", "text": text}},
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "鍵を閉める"},
+                        "action_id": "lock_door",
+                        "style": "primary",
+                    }
+                ],
+            },
+        ],
+    }
+
+    data = json.dumps(slack_message).encode("utf-8")
+    req = urllib.request.Request(
+        SLACK_WEBHOOK_URL,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req):
+        pass
+
+
+def lock_smart_lock() -> None:
+    """スマートロックを施錠する。
+
+    Raises:
+        SwitchBotError: API 呼び出しに失敗した場合。
+    """
+    path = f"/v1.1/devices/{DeviceId.SMART_LOCK}/commands"
+    request_json(
+        "POST",
+        path,
+        {
+            "commandType": "command",
+            "command": "lock",
+            "parameter": "default",
+        },
+    )
+
+
 def lock_check() -> None:
-    """スマートロックの解錠・ドア開状態をチェックし、異常時に Slack へ通知する。"""
+    """スマートロックの解錠・ドア開状態をチェックし、5分以上継続時に Slack へ通知する。"""
     path = f"/v1.1/devices/{DeviceId.SMART_LOCK}/status"
 
     response = request_json("GET", path)
@@ -429,35 +512,24 @@ def lock_check() -> None:
     is_door_closed = door_state == "closed"
     should_alert = is_unlocked or not is_door_closed
 
+    now = int(time.time())
     state = _get_lock_alert_state()
     was_alert_active = bool(state.get("alert_active", False))
+    abnormal_since = state.get("abnormal_since")
 
-    if should_alert and not was_alert_active:
-        status_parts = [f"`lockState: {lock_state}`"]
-        if door_state is not None:
-            status_parts.append(f"`doorState: {door_state}`")
-        if battery is not None:
-            status_parts.append(f"`battery: {battery} %`")
-        status = "\n" + "\n".join(status_parts)
+    if not should_alert:
+        if was_alert_active or abnormal_since is not None:
+            _put_lock_alert_state(alert_active=False, abnormal_since=None)
+        return
 
-        slack_message = {
-            "text": f"<@U099ANR7PL7> :rotating_light: :door: :warning: *警告: ドアが開いています* :lock: {status}"
-        }
+    if abnormal_since is None:
+        _put_lock_alert_state(alert_active=False, abnormal_since=now)
+        return
 
-        data = json.dumps(slack_message).encode("utf-8")
-        req = urllib.request.Request(
-            SLACK_WEBHOOK_URL,
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req):
-            pass
-
-        _put_lock_alert_state(True)
-
-    if not should_alert and was_alert_active:
-        _put_lock_alert_state(False)
+    elapsed = now - int(abnormal_since)
+    if elapsed >= LOCK_ALERT_DELAY_SECONDS and not was_alert_active:
+        _send_lock_slack_alert(lock_state, door_state, battery)
+        _put_lock_alert_state(alert_active=True, abnormal_since=int(abnormal_since))
 
 
 if __name__ == "__main__":
