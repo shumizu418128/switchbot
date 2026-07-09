@@ -11,7 +11,7 @@ from typing import Any
 import boto3
 from botocore.exceptions import ClientError
 from models import DeviceId
-from switchbot_client import request_json
+from switchbot_client import SwitchBotError, request_json
 
 SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "").strip()
 ALERT_STATE_PARAM = os.environ.get("ALERT_STATE_PARAM", "").strip()
@@ -22,6 +22,8 @@ HUMIDITY_HISTORY_PARAM = os.environ.get("HUMIDITY_HISTORY_PARAM", "").strip()
 HUMIDITY_CHECK_INTERVAL_SECONDS = 3600
 HUMIDITY_WINDOW_SECONDS = 3600
 LOCK_ALERT_DELAY_SECONDS = 300
+LIGHT_SETTLE_SECONDS = 8
+LIGHT_ACTION_MAX_ATTEMPTS = 5
 
 ssm_client = boto3.client("ssm")
 
@@ -60,6 +62,148 @@ def _put_home_presence_state(at_home: bool) -> None:
     )
 
 
+def _get_hub2_light_level() -> int:
+    """Hub 2 の ambient lightLevel（1〜20）を取得する。
+
+    Returns:
+        Hub 2 の ``lightLevel``。
+
+    Raises:
+        ValueError: ``lightLevel`` が応答に含まれない場合。
+    """
+    path = f"/v1.1/devices/{DeviceId.HUB2}/status"
+    response = request_json("GET", path)
+    light_level = response.get("body", {}).get("lightLevel")
+    if light_level is None:
+        raise ValueError(f"Hub 2 lightLevel が取得できません: {response}")
+    return int(light_level)
+
+
+def _send_light_command(command_type: str, command: str) -> None:
+    """ライト（IR）へコマンドを1回送る。"""
+    path = f"/v1.1/devices/{DeviceId.LIGHT}/commands"
+    request_json(
+        "POST",
+        path,
+        {
+            "commandType": command_type,
+            "command": command,
+            "parameter": "default",
+        },
+    )
+
+
+def _measure_light_change(
+    before_level: int,
+    *,
+    command_type: str,
+    command: str,
+    phase: str,
+    attempt: int,
+    expect_increase: bool,
+) -> tuple[int, bool]:
+    """コマンド1回の直前・直後の lightLevel を比較する。
+
+    Args:
+        before_level: コマンド送信前の明るさ。
+        command_type: SwitchBot の ``commandType``。
+        command: 送信するコマンド名。
+        phase: ログ用フェーズ名（``on`` / ``off``）。
+        attempt: 試行回数。
+        expect_increase: ``True`` なら明るくなることを期待。
+
+    Returns:
+        ``(after_level, changed_as_expected)``。``after_level`` は新規計測値。
+    """
+    _send_light_command(command_type, command)
+    time.sleep(LIGHT_SETTLE_SECONDS)
+    after_level = _get_hub2_light_level()
+    diff = after_level - before_level
+    changed = diff > 0 if expect_increase else diff < 0
+    print(
+        f"_measure_light_change: phase={phase} attempt={attempt} "
+        f"before={before_level} after={after_level} diff={diff} "
+        f"changed={changed}",
+        flush=True,
+    )
+    return after_level, changed
+
+
+def _retry_until_light_change(
+    start_level: int,
+    *,
+    command_type: str,
+    command: str,
+    phase: str,
+    expect_increase: bool,
+) -> tuple[int, bool]:
+    """同一コマンドを再送し、直前・直後の差分が出るまで試行する。
+
+    計測値は ``start_level`` → ``after_1`` → ``after_2`` … と連鎖する。
+    各試行で ``before_level`` を引数として渡し、次試行には ``int(after_level)`` を渡す。
+
+    Returns:
+        ``(last_level, changed_as_expected)``
+    """
+    before_level = int(start_level)
+    last_level = before_level
+
+    for attempt in range(1, LIGHT_ACTION_MAX_ATTEMPTS + 1):
+        after_level, changed = _measure_light_change(
+            before_level,
+            command_type=command_type,
+            command=command,
+            phase=phase,
+            attempt=attempt,
+            expect_increase=expect_increase,
+        )
+        last_level = after_level
+        if changed:
+            return last_level, True
+
+        print(
+            f"_retry_until_light_change: phase={phase} "
+            f"attempt={attempt} 差分なしのため再送します",
+            flush=True,
+        )
+        before_level = int(after_level)
+
+    return last_level, False
+
+
+def _ensure_light_off() -> bool:
+    """コマンド1回ごとに直前・直後の lightLevel を比較し、オフを保証する。
+
+    計測値を連鎖させる（1と2、2と3、…）。
+    - 「全灯」: 直後 > 直前 なら点灯成功
+    - ``turnOn``（トグル）: 直後 < 直前 なら消灯成功
+
+    絶対値は使わず差分のみ。失敗時は同じコマンドを再送する。
+
+    Returns:
+        消灯を確認できたら ``True``、できなければ ``False``。
+    """
+    initial_level = _get_hub2_light_level()
+    print(f"_ensure_light_off: initial={initial_level}", flush=True)
+
+    level_after_on, _ = _retry_until_light_change(
+        initial_level,
+        command_type="customize",
+        command="全灯",
+        phase="on",
+        expect_increase=True,
+    )
+
+    _, off_confirmed = _retry_until_light_change(
+        level_after_on,
+        command_type="command",
+        command="turnOn",
+        phase="off",
+        expect_increase=False,
+    )
+    return off_confirmed
+
+
 def on_arrived_home() -> None:
     """在宅状態が false から true に変化したときに呼ばれる。"""
     print("on_arrived_home: test message", flush=True)
@@ -67,40 +211,34 @@ def on_arrived_home() -> None:
 
 def on_left_home() -> None:
     """在宅状態が true から false に変化したときに呼ばれる。"""
-    path = f"/v1.1/devices/{DeviceId.AIR_CONDITIONER}/commands"
-    # エアコンを停止
-    request_json(
-        "POST",
-        path,
-        {
-            "commandType": "command",
-            "command": "turnOff",
-            "parameter": "default",
-        },
-    )
+    try:
+        path = f"/v1.1/devices/{DeviceId.AIR_CONDITIONER}/commands"
+        request_json(
+            "POST",
+            path,
+            {
+                "commandType": "command",
+                "command": "turnOff",
+                "parameter": "default",
+            },
+        )
+    except SwitchBotError as exc:
+        print(f"on_left_home: エアコン停止に失敗: {exc}", flush=True)
+        _send_slack_alert(
+            f"<@U099ANR7PL7> :rotating_light: *警告: 外出時のエアコン停止に失敗しました*\n`{exc}`"
+        )
 
-    path = f"/v1.1/devices/{DeviceId.LIGHT}/commands"
-    request_json(
-        "POST",
-        path,
-        {
-            "commandType": "customize",
-            "command": "全灯",
-            "parameter": "default",
-        },
-    )
-    time.sleep(2)
-
-    # 電源はトグルなので、turnOnとあるが電源が既に入っているときはオフになる
-    request_json(
-        "POST",
-        path,
-        {
-            "commandType": "command",
-            "command": "turnOn",
-            "parameter": "default",
-        },
-    )
+    try:
+        if not _ensure_light_off():
+            print("_ensure_light_off: failed to confirm light off", flush=True)
+            _send_slack_alert(
+                "<@U099ANR7PL7> :rotating_light: *警告: 外出時のライト消灯を確認できませんでした*"
+            )
+    except SwitchBotError as exc:
+        print(f"on_left_home: ライト消灯に失敗: {exc}", flush=True)
+        _send_slack_alert(
+            f"<@U099ANR7PL7> :rotating_light: *警告: 外出時のライト操作で API エラー*\n`{exc}`"
+        )
 
     print("on_left_home", flush=True)
 

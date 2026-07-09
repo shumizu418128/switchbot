@@ -7,19 +7,19 @@ $awsRegion = "ap-northeast-1"
 $envFilePath = ".env"
 
 if (-not (Get-Command aws -ErrorAction SilentlyContinue)) {
-    Write-Error "aws CLI が見つかりません。インストールしてください。"
+    Write-Error "aws CLI not found. Please install it."
 }
 
 if (-not (Get-Command sam -ErrorAction SilentlyContinue)) {
-    Write-Error "AWS SAM CLI が見つかりません。インストールしてください。"
+    Write-Error "AWS SAM CLI not found. Please install it."
 }
 
 if (-not (Test-Path -LiteralPath $templateFile -PathType Leaf)) {
-    Write-Error "$templateFile が見つかりません。"
+    Write-Error "$templateFile not found."
 }
 
 if (-not (Test-Path -LiteralPath $envFilePath -PathType Leaf)) {
-    Write-Error ".env が見つかりません。"
+    Write-Error ".env not found."
 }
 
 # .env の KEY=VALUE を環境変数として現在セッションに読み込む
@@ -50,27 +50,27 @@ foreach ($requiredKey in $requiredEnvVars) {
 }
 
 if ($missingVars.Count -gt 0) {
-    Write-Error ".env の必須キーが不足しています: $($missingVars -join ', ')"
+    Write-Error ".env is missing required keys: $($missingVars -join ', ')"
 }
 
 $awsProfile = $env:AWS_PROFILE
 
 if (-not $env:AWS_PROFILE) {
-    Write-Error "AWS_PROFILE が未設定です。先に設定してください。"
+    Write-Error "AWS_PROFILE is not set. Please set it first."
 }
 
 Write-Host ""
-Write-Host "AWS 認証状態を確認しています..."
+Write-Host "Checking AWS authentication..."
 
 & aws sts get-caller-identity --profile $awsProfile *> $null
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "AWS にログインしていないため、aws sso login を実行します（profile: $awsProfile）..."
+    Write-Host "Not logged into AWS; running 'aws sso login' (profile: $awsProfile)..."
     & aws sso login --profile $awsProfile
 }
 
 & aws sts get-caller-identity --profile $awsProfile *> $null
 if ($LASTEXITCODE -ne 0) {
-    Write-Error "AWS 認証の確認に失敗しました。profile=$awsProfile を確認してください。"
+    Write-Error "Failed to verify AWS authentication. Please check profile=$awsProfile."
 }
 
 Write-Host ""
@@ -78,7 +78,7 @@ Write-Host "building..."
 & sam build --template-file $templateFile
 
 Write-Host ""
-Write-Host "通知状態パラメータを確認しています..."
+Write-Host "Checking notification state parameter..."
 
 $switchBotApiBaseUrl = if ([string]::IsNullOrWhiteSpace($env:SWITCHBOT_API_BASE_URL)) { "https://api.switch-bot.com" } else { $env:SWITCHBOT_API_BASE_URL }
 $co2AlertStateParamName = "/$stackName/CO2_ALERT_STATE"
@@ -90,7 +90,7 @@ $co2ParamCheckOutput = (& aws ssm get-parameter `
 
 if ($LASTEXITCODE -ne 0) {
     if (($co2ParamCheckOutput -join "`n") -match "ParameterNotFound") {
-        Write-Host "通知状態パラメータを初期作成します: $co2AlertStateParamName"
+        Write-Host "Creating notification state parameter: $co2AlertStateParamName"
         & aws ssm put-parameter `
             --name $co2AlertStateParamName `
             --value $co2AlertStateInitialValue `
@@ -99,16 +99,16 @@ if ($LASTEXITCODE -ne 0) {
             --profile $awsProfile 2>&1 | Out-Host
 
         if ($LASTEXITCODE -ne 0) {
-            Write-Error "通知状態パラメータの初期作成に失敗しました: $co2AlertStateParamName"
+            Write-Error "Failed to initialize notification state parameter: $co2AlertStateParamName"
         }
     } else {
         Write-Host ($co2ParamCheckOutput -join "`n")
-        Write-Error "通知状態パラメータの確認に失敗しました: $co2AlertStateParamName"
+        Write-Error "Failed to check notification state parameter: $co2AlertStateParamName"
     }
 }
 
 Write-Host ""
-Write-Host "湿度履歴パラメータを確認しています..."
+Write-Host "Checking humidity history parameter..."
 
 $humidityHistoryParamName = "/$stackName/HUMIDITY_HISTORY"
 $humidityHistoryInitialValue = '[]'
@@ -119,7 +119,7 @@ $humidityHistoryParamCheckOutput = (& aws ssm get-parameter `
 
 if ($LASTEXITCODE -ne 0) {
     if (($humidityHistoryParamCheckOutput -join "`n") -match "ParameterNotFound") {
-        Write-Host "湿度履歴パラメータを初期作成します: $humidityHistoryParamName"
+        Write-Host "Creating humidity history parameter: $humidityHistoryParamName"
         & aws ssm put-parameter `
             --name $humidityHistoryParamName `
             --value $humidityHistoryInitialValue `
@@ -128,16 +128,16 @@ if ($LASTEXITCODE -ne 0) {
             --profile $awsProfile 2>&1 | Out-Host
 
         if ($LASTEXITCODE -ne 0) {
-            Write-Error "湿度履歴パラメータの初期作成に失敗しました: $humidityHistoryParamName"
+            Write-Error "Failed to initialize humidity history parameter: $humidityHistoryParamName"
         }
     } else {
         Write-Host ($humidityHistoryParamCheckOutput -join "`n")
-        Write-Error "湿度履歴パラメータの確認に失敗しました: $humidityHistoryParamName"
+        Write-Error "Failed to check humidity history parameter: $humidityHistoryParamName"
     }
 }
 
 Write-Host ""
-Write-Host "在宅状態パラメータを確認しています..."
+Write-Host "Checking at-home state parameter..."
 
 $wifiSsidParamName = "/$stackName/WIFI_SSID"
 $wifiSsidInitialValue = '{"at_home":false,"updated_at":null}'
@@ -148,7 +148,7 @@ $wifiParamCheckOutput = (& aws ssm get-parameter `
 
 if ($LASTEXITCODE -ne 0) {
     if (($wifiParamCheckOutput -join "`n") -match "ParameterNotFound") {
-        Write-Host "在宅状態パラメータを初期作成します: $wifiSsidParamName"
+        Write-Host "Creating at-home state parameter: $wifiSsidParamName"
         & aws ssm put-parameter `
             --name $wifiSsidParamName `
             --value $wifiSsidInitialValue `
@@ -157,16 +157,16 @@ if ($LASTEXITCODE -ne 0) {
             --profile $awsProfile 2>&1 | Out-Host
 
         if ($LASTEXITCODE -ne 0) {
-            Write-Error "在宅状態パラメータの初期作成に失敗しました: $wifiSsidParamName"
+            Write-Error "Failed to initialize at-home state parameter: $wifiSsidParamName"
         }
     } else {
         Write-Host ($wifiParamCheckOutput -join "`n")
-        Write-Error "在宅状態パラメータの確認に失敗しました: $wifiSsidParamName"
+        Write-Error "Failed to check at-home state parameter: $wifiSsidParamName"
     }
 }
 
 Write-Host ""
-Write-Host "鍵通知状態パラメータを確認しています..."
+Write-Host "Checking lock notification state parameter..."
 
 $lockAlertStateParamName = "/$stackName/LOCK_ALERT_STATE"
 $lockAlertStateInitialValue = '{"alert_active":false,"abnormal_since":null,"updated_at":null}'
@@ -177,7 +177,7 @@ $lockParamCheckOutput = (& aws ssm get-parameter `
 
 if ($LASTEXITCODE -ne 0) {
     if (($lockParamCheckOutput -join "`n") -match "ParameterNotFound") {
-        Write-Host "鍵通知状態パラメータを初期作成します: $lockAlertStateParamName"
+        Write-Host "Creating lock notification state parameter: $lockAlertStateParamName"
         & aws ssm put-parameter `
             --name $lockAlertStateParamName `
             --value $lockAlertStateInitialValue `
@@ -186,11 +186,11 @@ if ($LASTEXITCODE -ne 0) {
             --profile $awsProfile 2>&1 | Out-Host
 
         if ($LASTEXITCODE -ne 0) {
-            Write-Error "鍵通知状態パラメータの初期作成に失敗しました: $lockAlertStateParamName"
+            Write-Error "Failed to initialize lock notification state parameter: $lockAlertStateParamName"
         }
     } else {
         Write-Host ($lockParamCheckOutput -join "`n")
-        Write-Error "鍵通知状態パラメータの確認に失敗しました: $lockAlertStateParamName"
+        Write-Error "Failed to check lock notification state parameter: $lockAlertStateParamName"
     }
 }
 
@@ -220,11 +220,11 @@ if (-not [string]::IsNullOrWhiteSpace($env:API_KEY)) {
     --s3-prefix $s3Prefix
 
 if ($LASTEXITCODE -ne 0) {
-    Write-Error "デプロイに失敗しました。"
+    Write-Error "Deployment failed."
 }
 
 Write-Host ""
-Write-Host "API Gateway 情報を取得しています..."
+Write-Host "Retrieving API Gateway information..."
 
 $stackOutputsJson = & aws cloudformation describe-stacks `
     --stack-name $stackName `
@@ -234,7 +234,7 @@ $stackOutputsJson = & aws cloudformation describe-stacks `
     --output json
 
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($stackOutputsJson)) {
-    Write-Error "スタック出力の取得に失敗しました。"
+    Write-Error "Failed to retrieve stack outputs."
 }
 
 $stackOutputs = $stackOutputsJson | ConvertFrom-Json
@@ -243,7 +243,7 @@ $wifiEndpoint = ($stackOutputs | Where-Object { $_.OutputKey -eq "SwitchBotWifiE
 $slackInteractionsEndpoint = ($stackOutputs | Where-Object { $_.OutputKey -eq "SwitchBotSlackInteractionsEndpoint" }).OutputValue
 
 if ([string]::IsNullOrWhiteSpace($apiKeyId)) {
-    Write-Error "SwitchBotApiKeyId の出力が見つかりません。"
+    Write-Error "Output for SwitchBotApiKeyId not found."
 }
 
 $apiKeyValueOutput = (& aws apigateway get-api-key `
@@ -256,17 +256,17 @@ $apiKeyValueOutput = (& aws apigateway get-api-key `
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host ($apiKeyValueOutput -join "`n")
-    Write-Error "API キー値の取得に失敗しました。"
+    Write-Error "Failed to retrieve API key value."
 }
 
 Write-Host ""
-Write-Host "API Gateway 設定:"
+Write-Host "API Gateway settings:"
 Write-Host "  WiFi endpoint: $wifiEndpoint"
 Write-Host "  Slack Interactivity (Request URL): $slackInteractionsEndpoint"
 Write-Host "  API key (x-api-key): $apiKeyValueOutput"
 Write-Host ""
-Write-Host "呼び出し例:"
+Write-Host "Example call:"
 Write-Host ('  curl -X POST "' + $wifiEndpoint + '" -H "x-api-key: ' + $apiKeyValueOutput + '" -H "Content-Type: application/json" -d "{\"event\":\"wifi_connected\",\"ssid\":\"YOUR_SSID\",\"timestamp\":\"2026-05-20T12:00:00+09:00\"}"')
 
 Write-Host ""
-Write-Host ("デプロイ完了: " + (Get-Date -Format "yyyy-MM-dd HH:mm:ss"))
+Write-Host ("Deployment completed: " + (Get-Date -Format "yyyy-MM-dd HH:mm:ss"))
