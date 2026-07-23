@@ -22,8 +22,9 @@ HUMIDITY_HISTORY_PARAM = os.environ.get("HUMIDITY_HISTORY_PARAM", "").strip()
 HUMIDITY_CHECK_INTERVAL_SECONDS = 3600
 HUMIDITY_WINDOW_SECONDS = 3600
 LOCK_ALERT_DELAY_SECONDS = 300
-LIGHT_SETTLE_SECONDS = 8
-LIGHT_ACTION_MAX_ATTEMPTS = 5
+LIGHT_OFF_TIMER_COMMAND = "30分切り"
+LIGHT_OFF_TIMER_SEND_COUNT = 3
+LIGHT_OFF_TIMER_SEND_GAP_SECONDS = 8
 
 ssm_client = boto3.client("ssm")
 
@@ -67,6 +68,38 @@ def on_arrived_home() -> None:
     print("on_arrived_home: test message", flush=True)
 
 
+def _send_light_off_timer() -> None:
+    """外出時にライトの30分切タイマーを送信する（反映漏れ対策で複数回送る）。"""
+    path = f"/v1.1/devices/{DeviceId.LIGHT}/commands"
+    body = {
+        "commandType": "customize",
+        "command": LIGHT_OFF_TIMER_COMMAND,
+        "parameter": "default",
+    }
+    failures: list[str] = []
+
+    for attempt in range(1, LIGHT_OFF_TIMER_SEND_COUNT + 1):
+        try:
+            request_json("POST", path, body)
+            print(
+                f"on_left_home: ライト30分切送信 {attempt}/{LIGHT_OFF_TIMER_SEND_COUNT}",
+                flush=True,
+            )
+        except SwitchBotError as exc:
+            msg = f"{attempt}回目: {exc}"
+            failures.append(msg)
+            print(f"on_left_home: ライト30分切送信失敗 {msg}", flush=True)
+
+        if attempt < LIGHT_OFF_TIMER_SEND_COUNT:
+            time.sleep(LIGHT_OFF_TIMER_SEND_GAP_SECONDS)
+
+    if len(failures) == LIGHT_OFF_TIMER_SEND_COUNT:
+        detail = "\n".join(f"`{item}`" for item in failures)
+        _send_slack_alert(
+            f"<@U099ANR7PL7> :rotating_light: *警告: 外出時のライト30分切送信に失敗しました*\n{detail}"
+        )
+
+
 def on_left_home() -> None:
     """在宅状態が true から false に変化したときに呼ばれる。"""
     try:
@@ -85,6 +118,8 @@ def on_left_home() -> None:
         _send_slack_alert(
             f"<@U099ANR7PL7> :rotating_light: *警告: 外出時のエアコン停止に失敗しました*\n`{exc}`"
         )
+
+    _send_light_off_timer()
 
     print("on_left_home done", flush=True)
 
