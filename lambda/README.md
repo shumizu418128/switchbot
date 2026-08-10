@@ -4,7 +4,7 @@ SwitchBot OpenAPI v1.1 経由の CO2 センサー監視と、API Gateway 経由�
 
 ## 動作
 
-- **スケジュール（5分ごと）**: CO2 をチェックし、閾値超過時に Slack へ通知（SSM で通知状態を管理）。湿度は1時間に1回チェックし、正常範囲に戻るまで再通知しない。スマートロックの解錠も監視し、解錠時に Slack へ通知
+- **スケジュール（5分ごと）**: CO2 をチェックし、閾値超過時に Slack へ通知（SSM で通知状態を管理）。スマートロックの解錠も監視し、解錠時に Slack へ通知
 - **POST `/wifi`**: クライアント Webhook（`wifi_connected` / `wifi_disconnected`）に応じて在宅状態を更新し、変化時のみフック処理後に SSM へ `at_home` を保存（API Gateway の API Key 必須）
 
 ## 環境変数

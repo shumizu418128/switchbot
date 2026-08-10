@@ -18,9 +18,6 @@ ALERT_STATE_PARAM = os.environ.get("ALERT_STATE_PARAM", "").strip()
 LOCK_ALERT_STATE_PARAM = os.environ.get("LOCK_ALERT_STATE_PARAM", "").strip()
 WIFI_STATE_PARAM = os.environ.get("WIFI_STATE_PARAM", "").strip()
 HOME_WIFI_SSID = os.environ.get("HOME_WIFI_SSID", "").strip()
-HUMIDITY_HISTORY_PARAM = os.environ.get("HUMIDITY_HISTORY_PARAM", "").strip()
-HUMIDITY_CHECK_INTERVAL_SECONDS = 3600
-HUMIDITY_WINDOW_SECONDS = 3600
 LOCK_ALERT_DELAY_SECONDS = 300
 LIGHT_OFF_TIMER_COMMAND = "30分切り"
 LIGHT_OFF_TIMER_SEND_COUNT = 3
@@ -160,88 +157,6 @@ def update_home_presence_from_ssid(event: str, ssid: str | None = None) -> bool:
 
 
 #####################################
-# MARK: - Humidity history
-#####################################
-def _get_humidity_history() -> list[dict[str, Any]]:
-    """SSM Parameter Store から湿度履歴を取得する。
-
-    Returns:
-        ``{"value": float, "timestamp": int}`` のリスト。取得失敗時は空リスト。
-    """
-    if not HUMIDITY_HISTORY_PARAM:
-        return []
-
-    try:
-        result = ssm_client.get_parameter(
-            Name=HUMIDITY_HISTORY_PARAM, WithDecryption=True
-        )
-        raw_value = result.get("Parameter", {}).get("Value", "[]")
-        history = json.loads(raw_value)
-        if isinstance(history, list):
-            return history
-    except ssm_client.exceptions.ParameterNotFound:
-        return []
-    except (ClientError, json.JSONDecodeError):
-        return []
-
-    return []
-
-
-def _put_humidity_history(history: list[dict[str, Any]]) -> None:
-    """SSM Parameter Store に湿度履歴を保存する。
-
-    Args:
-        history: ``{"value": float, "timestamp": int}`` のリスト。
-    """
-    if not HUMIDITY_HISTORY_PARAM:
-        return
-
-    value = json.dumps(history)
-    ssm_client.put_parameter(
-        Name=HUMIDITY_HISTORY_PARAM, Value=value, Type="String", Overwrite=True
-    )
-
-
-def _update_humidity_history(current_value: float) -> float:
-    """湿度履歴に新しい値を追加し、1時間以内の平均値を返す。
-
-    古いエントリ（HUMIDITY_WINDOW_SECONDS 超過）を自動で削除してから保存する。
-
-    Args:
-        current_value: 現在の湿度（%）。
-
-    Returns:
-        過去1時間の湿度平均値（%）。
-    """
-    history = _get_humidity_history()
-
-    now = int(time.time())
-    cutoff = now - HUMIDITY_WINDOW_SECONDS
-
-    history = [entry for entry in history if entry.get("timestamp", 0) >= cutoff]
-    history.append({"value": current_value, "timestamp": now})
-
-    _put_humidity_history(history)
-
-    values = [entry["value"] for entry in history]
-    return sum(values) / len(values)
-
-
-def _should_run_humidity_check() -> bool:
-    """前回の湿度チェックから HUMIDITY_CHECK_INTERVAL_SECONDS 以上経過しているか。
-
-    Returns:
-        湿度チェックを実行すべきなら ``True``。履歴が空のときは初回として ``True``。
-    """
-    history = _get_humidity_history()
-    if not history:
-        return True
-
-    last_ts = max(entry.get("timestamp", 0) for entry in history)
-    return time.time() - last_ts >= HUMIDITY_CHECK_INTERVAL_SECONDS
-
-
-#####################################
 # MARK: - CO2
 #####################################
 def _get_alert_state() -> dict[str, Any]:
@@ -251,7 +166,6 @@ def _get_alert_state() -> dict[str, Any]:
             "alert_active": False,
             "last_alert_type": None,
             "updated_at": None,
-            "humidity_alert_active": False,
         }
 
     try:
@@ -263,49 +177,34 @@ def _get_alert_state() -> dict[str, Any]:
             "alert_active": False,
             "last_alert_type": None,
             "updated_at": None,
-            "humidity_alert_active": False,
         }
     except (ClientError, json.JSONDecodeError):
         return {
             "alert_active": False,
             "last_alert_type": None,
             "updated_at": None,
-            "humidity_alert_active": False,
         }
-
-    humidity_alert_active = state.get("humidity_alert_active")
-    if humidity_alert_active is None:
-        humidity_alert_active = state.get("last_humidity_alert_at") is not None
 
     return {
         "alert_active": bool(state.get("alert_active", False)),
         "last_alert_type": state.get("last_alert_type"),
         "updated_at": state.get("updated_at"),
-        "humidity_alert_active": bool(humidity_alert_active),
     }
 
 
 def _put_alert_state(
     alert_active: bool,
     alert_type: str | None,
-    *,
-    humidity_alert_active: bool | None = None,
 ) -> None:
     """SSM Parameter Store に通知状態を保存する。"""
     if not ALERT_STATE_PARAM:
         return
 
-    current = _get_alert_state()
     value = json.dumps(
         {
             "alert_active": alert_active,
             "last_alert_type": alert_type,
             "updated_at": int(time.time()),
-            "humidity_alert_active": (
-                humidity_alert_active
-                if humidity_alert_active is not None
-                else current.get("humidity_alert_active", False)
-            ),
         }
     )
     ssm_client.put_parameter(
@@ -342,8 +241,6 @@ def co2_check() -> None:
     battery = body.get("battery")
 
     co2_threshold = 1000
-    humidity_min_threshold = 40
-    humidity_max_threshold = 60
 
     state = _get_alert_state()
     was_alert_active = bool(state.get("alert_active", False))
@@ -363,40 +260,6 @@ def co2_check() -> None:
         and state.get("last_alert_type") == "co2"
     ):
         _put_alert_state(False, None)
-
-    if not _should_run_humidity_check():
-        return
-
-    state = _get_alert_state()
-    avg_humidity = _update_humidity_history(humidity)
-    humidity_alert_active = bool(state.get("humidity_alert_active", False))
-    out_of_range = (
-        avg_humidity <= humidity_min_threshold or avg_humidity >= humidity_max_threshold
-    )
-    in_normal_range = humidity_min_threshold < avg_humidity < humidity_max_threshold
-
-    if out_of_range and not humidity_alert_active:
-        avg_humidity_rounded = round(avg_humidity, 1)
-        status = (
-            f"\n`{co2} ppm`\n`{temperature} ℃`\n"
-            f"`{avg_humidity_rounded} %（1時間平均）`\n`battery: {battery} %`"
-        )
-        if avg_humidity <= humidity_min_threshold:
-            alert_text = f"<@U099ANR7PL7> :rotating_light: *警告: 湿度が{humidity_min_threshold}%未満です*{status}"
-        else:
-            alert_text = f"<@U099ANR7PL7> :rotating_light: *警告: 湿度が{humidity_max_threshold}%を超えました*{status}"
-        _send_slack_alert(alert_text)
-        _put_alert_state(
-            bool(state.get("alert_active")),
-            state.get("last_alert_type"),
-            humidity_alert_active=True,
-        )
-    elif in_normal_range and humidity_alert_active:
-        _put_alert_state(
-            bool(state.get("alert_active")),
-            state.get("last_alert_type"),
-            humidity_alert_active=False,
-        )
 
 
 #####################################

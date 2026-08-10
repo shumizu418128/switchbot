@@ -82,7 +82,7 @@ Write-Host "Checking notification state parameter..."
 
 $switchBotApiBaseUrl = if ([string]::IsNullOrWhiteSpace($env:SWITCHBOT_API_BASE_URL)) { "https://api.switch-bot.com" } else { $env:SWITCHBOT_API_BASE_URL }
 $co2AlertStateParamName = "/$stackName/CO2_ALERT_STATE"
-$co2AlertStateInitialValue = '{"alert_active":false,"last_alert_type":null,"updated_at":null,"humidity_alert_active":false}'
+$co2AlertStateInitialValue = '{"alert_active":false,"last_alert_type":null,"updated_at":null}'
 $co2ParamCheckOutput = (& aws ssm get-parameter `
     --name $co2AlertStateParamName `
     --region $awsRegion `
@@ -104,35 +104,6 @@ if ($LASTEXITCODE -ne 0) {
     } else {
         Write-Host ($co2ParamCheckOutput -join "`n")
         Write-Error "Failed to check notification state parameter: $co2AlertStateParamName"
-    }
-}
-
-Write-Host ""
-Write-Host "Checking humidity history parameter..."
-
-$humidityHistoryParamName = "/$stackName/HUMIDITY_HISTORY"
-$humidityHistoryInitialValue = '[]'
-$humidityHistoryParamCheckOutput = (& aws ssm get-parameter `
-    --name $humidityHistoryParamName `
-    --region $awsRegion `
-    --profile $awsProfile 2>&1)
-
-if ($LASTEXITCODE -ne 0) {
-    if (($humidityHistoryParamCheckOutput -join "`n") -match "ParameterNotFound") {
-        Write-Host "Creating humidity history parameter: $humidityHistoryParamName"
-        & aws ssm put-parameter `
-            --name $humidityHistoryParamName `
-            --value $humidityHistoryInitialValue `
-            --type "String" `
-            --region $awsRegion `
-            --profile $awsProfile 2>&1 | Out-Host
-
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error "Failed to initialize humidity history parameter: $humidityHistoryParamName"
-        }
-    } else {
-        Write-Host ($humidityHistoryParamCheckOutput -join "`n")
-        Write-Error "Failed to check humidity history parameter: $humidityHistoryParamName"
     }
 }
 
