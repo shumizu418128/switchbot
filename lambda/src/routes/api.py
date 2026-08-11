@@ -22,14 +22,14 @@ from switchbot_service import (
     WIFI_EVENT_CONNECTED,
     WIFI_EVENT_DISCONNECTED,
     lock_smart_lock,
-    update_home_presence_from_ssid,
+    update_home_presence_from_event,
 )
 
 RouteFn = Callable[[dict[str, Any]], dict[str, Any]]
 
 
 def _handle_wifi(body: dict[str, Any]) -> dict[str, Any]:
-    """POST /wifi: クライアント Webhook イベントから在宅判定を更新する。"""
+    """POST /wifi: termux-server Webhook イベントから在宅判定を更新する。"""
     event = body.get("event")
 
     if event not in (WIFI_EVENT_CONNECTED, WIFI_EVENT_DISCONNECTED):
@@ -41,15 +41,8 @@ def _handle_wifi(body: dict[str, Any]) -> dict[str, Any]:
             },
         )
 
-    ssid: str | None = None
-    if event == WIFI_EVENT_CONNECTED:
-        raw_ssid = body.get("ssid")
-        if not isinstance(raw_ssid, str) or not raw_ssid.strip():
-            return http_response(400, {"error": "ssid is required for wifi_connected"})
-        ssid = raw_ssid.strip()
-
     try:
-        at_home = update_home_presence_from_ssid(event, ssid)
+        at_home = update_home_presence_from_event(event)
     except ClientError as exc:
         return http_response(
             500, {"error": "failed to update home presence", "detail": str(exc)}

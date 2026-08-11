@@ -17,7 +17,6 @@ SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "").strip()
 ALERT_STATE_PARAM = os.environ.get("ALERT_STATE_PARAM", "").strip()
 LOCK_ALERT_STATE_PARAM = os.environ.get("LOCK_ALERT_STATE_PARAM", "").strip()
 WIFI_STATE_PARAM = os.environ.get("WIFI_STATE_PARAM", "").strip()
-HOME_WIFI_SSID = os.environ.get("HOME_WIFI_SSID", "").strip()
 LOCK_ALERT_DELAY_SECONDS = 300
 LIGHT_OFF_TIMER_COMMAND = "30分切り"
 LIGHT_OFF_TIMER_SEND_COUNT = 3
@@ -121,29 +120,24 @@ def on_left_home() -> None:
     print("on_left_home done", flush=True)
 
 
-WIFI_EVENT_CONNECTED = "wifi_connected"
-WIFI_EVENT_DISCONNECTED = "wifi_disconnected"
+WIFI_EVENT_CONNECTED = "connected"
+WIFI_EVENT_DISCONNECTED = "disconnected"
 
 
-def update_home_presence_from_ssid(event: str, ssid: str | None = None) -> bool:
-    """Webhook イベントと SSID から在宅判定し、変化時のみ処理して保存する。
+def update_home_presence_from_event(event: str) -> bool:
+    """termux-server Webhook イベントから在宅判定し、変化時のみ処理して保存する。
 
     CO2 監視と同様、SSM の以前の状態を読んでから現在の在宅かどうかを決める。
 
     Args:
-        event: ``wifi_connected`` または ``wifi_disconnected``。
-        ssid: 接続時の WiFi SSID（切断時は不要）。
+        event: ``connected`` または ``disconnected``。
 
     Returns:
         現在の在宅判定。
     """
     state = _get_home_presence_state()
     was_at_home = bool(state.get("at_home", False))
-
-    if event == WIFI_EVENT_CONNECTED:
-        at_home = bool(HOME_WIFI_SSID) and ssid == HOME_WIFI_SSID
-    else:
-        at_home = False
+    at_home = event == WIFI_EVENT_CONNECTED
 
     if at_home and not was_at_home:
         on_arrived_home()

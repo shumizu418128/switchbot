@@ -1,11 +1,11 @@
 # SwitchBot Lambda
 
-SwitchBot OpenAPI v1.1 経由の CO2 センサー監視と、API Gateway 経由の WiFi 在宅判定を行う **AWS Lambda** 用コードです。
+SwitchBot OpenAPI v1.1 経由の CO2 センサー監視と、API Gateway 経由の在宅判定（termux-server Webhook）を行う **AWS Lambda** 用コードです。
 
 ## 動作
 
 - **スケジュール（5分ごと）**: CO2 をチェックし、閾値超過時に Slack へ通知（SSM で通知状態を管理）。スマートロックの解錠も監視し、解錠時に Slack へ通知
-- **POST `/wifi`**: クライアント Webhook（`wifi_connected` / `wifi_disconnected`）に応じて在宅状態を更新し、変化時のみフック処理後に SSM へ `at_home` を保存（API Gateway の API Key 必須）
+- **POST `/wifi`**: termux-server からの Webhook（`connected` / `disconnected`）に応じて在宅状態を更新し、変化時のみフック処理後に SSM へ `at_home` を保存（API Gateway の API Key 必須）
 
 ## 環境変数
 
@@ -14,7 +14,6 @@ SwitchBot OpenAPI v1.1 経由の CO2 センサー監視と、API Gateway 経由�
 | `TOKEN` | はい | SwitchBot Open Token |
 | `CLIENT_SECRET` | はい | SwitchBot Secret |
 | `SLACK_WEBHOOK_URL` | はい | Slack Incoming Webhook URL |
-| `HOME_WIFI_SSID` | はい | 家の WiFi SSID（在宅判定用） |
 | `SWITCHBOT_API_BASE_URL` | いいえ | 省略時 `https://api.switch-bot.com` |
 | `ALERT_STATE_PARAM` | デプロイ時設定 | CO2 通知状態の SSM パラメータ名 |
 | `LOCK_ALERT_STATE_PARAM` | デプロイ時設定 | スマートロック解錠通知状態の SSM パラメータ名 |
@@ -30,19 +29,21 @@ SwitchBot OpenAPI v1.1 経由の CO2 センサー監視と、API Gateway 経由�
 
 ## API（`/wifi`）
 
+termux-server の LAN 監視 webhook を受け取り、在宅判定を更新します。
+
 | フィールド | 必須 | 説明 |
 |------------|------|------|
-| `event` | はい | `wifi_connected` または `wifi_disconnected` |
-| `ssid` | 接続時のみ | 接続中の WiFi SSID（`wifi_connected` のみ） |
-| `timestamp` | いいえ | クライアント送信時刻（ISO-8601、サーバーでは未使用） |
+| `event` | はい | `connected` または `disconnected` |
+| `online` | いいえ | 接続状態（サーバーでは未使用） |
+| `checked_at` | いいえ | 監視時刻（ISO-8601、サーバーでは未使用） |
 
 接続時リクエスト例:
 
 ```json
 {
-  "event": "wifi_connected",
-  "ssid": "MyHomeWiFi",
-  "timestamp": "2026-05-20T12:00:00+09:00"
+  "event": "connected",
+  "online": true,
+  "checked_at": "2026-08-11T14:45:00+09:00"
 }
 ```
 
@@ -50,12 +51,13 @@ SwitchBot OpenAPI v1.1 経由の CO2 センサー監視と、API Gateway 経由�
 
 ```json
 {
-  "event": "wifi_disconnected",
-  "timestamp": "2026-05-20T18:00:00+09:00"
+  "event": "disconnected",
+  "online": false,
+  "checked_at": "2026-08-11T18:00:00+09:00"
 }
 ```
 
-`wifi_connected` では `ssid` を `HOME_WIFI_SSID` と比較します。`wifi_disconnected` では在宅だった場合に外出扱いとします。
+`connected` は在宅、`disconnected` は外出として扱います。
 
 成功時レスポンス例:
 
@@ -65,7 +67,7 @@ SwitchBot OpenAPI v1.1 経由の CO2 センサー監視と、API Gateway 経由�
 
 認証は API Gateway の `x-api-key` ヘッダーです。
 
-在宅状態が変化したとき、`switchbot_service.py` の `on_arrived_home` / `on_left_home` が呼ばれます（実装は各自で追加）。
+在宅状態が変化したとき、`switchbot_service.py` の `on_arrived_home` / `on_left_home` が呼ばれます。
 
 ## コード構成
 

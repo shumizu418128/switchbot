@@ -41,7 +41,7 @@ Get-Content -LiteralPath $envFilePath | ForEach-Object {
     Set-Item -Path ("Env:{0}" -f $key) -Value $value
 }
 
-$requiredEnvVars = @("TOKEN", "CLIENT_SECRET", "SLACK_WEBHOOK_URL", "SLACK_SIGNING_SECRET", "HOME_WIFI_SSID")
+$requiredEnvVars = @("TOKEN", "CLIENT_SECRET", "SLACK_WEBHOOK_URL", "SLACK_SIGNING_SECRET")
 $missingVars = @()
 foreach ($requiredKey in $requiredEnvVars) {
     if ([string]::IsNullOrWhiteSpace((Get-Item -Path ("Env:{0}" -f $requiredKey) -ErrorAction SilentlyContinue).Value)) {
@@ -173,8 +173,7 @@ $parameterOverrides = @(
     "ClientSecret=$($env:CLIENT_SECRET)",
     "SlackWebhookUrl=$($env:SLACK_WEBHOOK_URL)",
     "SlackSigningSecret=$($env:SLACK_SIGNING_SECRET)",
-    "SwitchBotApiBaseUrl=$switchBotApiBaseUrl",
-    "HomeWifiSsid=$($env:HOME_WIFI_SSID)"
+    "SwitchBotApiBaseUrl=$switchBotApiBaseUrl"
 )
 
 if (-not [string]::IsNullOrWhiteSpace($env:API_KEY)) {
@@ -237,7 +236,7 @@ Write-Host "  Slack Interactivity (Request URL): $slackInteractionsEndpoint"
 Write-Host "  API key (x-api-key): $apiKeyValueOutput"
 Write-Host ""
 Write-Host "Example call:"
-Write-Host ('  curl -X POST "' + $wifiEndpoint + '" -H "x-api-key: ' + $apiKeyValueOutput + '" -H "Content-Type: application/json" -d "{\"event\":\"wifi_connected\",\"ssid\":\"YOUR_SSID\",\"timestamp\":\"2026-05-20T12:00:00+09:00\"}"')
+Write-Host ('  curl -X POST "' + $wifiEndpoint + '" -H "x-api-key: ' + $apiKeyValueOutput + '" -H "Content-Type: application/json" -d "{\"event\":\"connected\",\"online\":true,\"checked_at\":\"2026-08-11T14:45:00+09:00\"}"')
 
 Write-Host ""
 Write-Host ("Deployment completed: " + (Get-Date -Format "yyyy-MM-dd HH:mm:ss"))
