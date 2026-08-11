@@ -22,6 +22,7 @@ from switchbot_service import (
     WIFI_EVENT_CONNECTED,
     WIFI_EVENT_DISCONNECTED,
     lock_smart_lock,
+    notify_lock_closed,
     update_home_presence_from_event,
 )
 
@@ -74,6 +75,7 @@ def _handle_slack_interactions(event: ApiGatewayEvent) -> dict[str, Any]:
     except SwitchBotError as exc:
         return slack_interaction_response(f"施錠に失敗しました: {exc}")
 
+    notify_lock_closed()
     return slack_interaction_response("鍵を閉めました。")
 
 

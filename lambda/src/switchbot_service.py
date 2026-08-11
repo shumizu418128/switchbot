@@ -61,7 +61,11 @@ def _put_home_presence_state(at_home: bool) -> None:
 
 def on_arrived_home() -> None:
     """在宅状態が false から true に変化したときに呼ばれる。"""
-    print("on_arrived_home: test message", flush=True)
+    print("on_arrived_home", flush=True)
+    try:
+        _send_slack_alert("帰宅を検知しました")
+    except Exception as exc:
+        print(f"on_arrived_home: Slack送信失敗: {exc}", flush=True)
 
 
 def _send_light_off_timer() -> None:
@@ -98,6 +102,11 @@ def _send_light_off_timer() -> None:
 
 def on_left_home() -> None:
     """在宅状態が true から false に変化したときに呼ばれる。"""
+    try:
+        _send_slack_alert("外出を検知しました")
+    except Exception as exc:
+        print(f"on_left_home: Slack送信失敗: {exc}", flush=True)
+
     try:
         path = f"/v1.1/devices/{DeviceId.AIR_CONDITIONER}/commands"
         request_json(
@@ -372,6 +381,14 @@ def lock_smart_lock() -> None:
             "parameter": "default",
         },
     )
+
+
+def notify_lock_closed() -> None:
+    """Slack の施錠ボタン成功後に、メンションなしで施錠完了を通知する。"""
+    try:
+        _send_slack_alert("鍵を閉めました")
+    except Exception as exc:
+        print(f"notify_lock_closed: Slack送信失敗: {exc}", flush=True)
 
 
 def lock_check() -> None:
