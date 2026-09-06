@@ -26,7 +26,7 @@ ssm_client = boto3.client("ssm")
 
 
 #####################################
-# MARK: - Wifi
+# MARK: - Bluetooth
 #####################################
 def _get_home_presence_state() -> dict[str, Any]:
     """SSM Parameter Store から在宅状態を取得する。"""
@@ -134,7 +134,7 @@ WIFI_EVENT_DISCONNECTED = "disconnected"
 
 
 def update_home_presence_from_event(event: str) -> bool:
-    """termux-server Webhook イベントから在宅判定し、変化時のみ処理して保存する。
+    """Pico WH Webhook イベントから在宅判定し、変化時のみ処理して保存する。
 
     CO2 監視と同様、SSM の以前の状態を読んでから現在の在宅かどうかを決める。
 

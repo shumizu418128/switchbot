@@ -82,11 +82,11 @@ Resources:
             Enabled: true
             Schedule: rate(5 minutes)
             Input: '{"action":"co2_and_lock_check"}'
-        WifiApi:
+        BluetoothApi:
           Type: Api
           Properties:
             RestApiId: !Ref SwitchBotApi
-            Path: /wifi
+            Path: /bluetooth
             Method: post
             Auth:
               ApiKeyRequired: true
@@ -133,9 +133,9 @@ Outputs:
   SwitchBotApiUrl:
     Description: API Gateway endpoint URL (prod stage).
     Value: !Sub https://${SwitchBotApi}.execute-api.${AWS::Region}.amazonaws.com/prod/
-  SwitchBotWifiEndpoint:
-    Description: POST endpoint for termux-server home presence webhook.
-    Value: !Sub https://${SwitchBotApi}.execute-api.${AWS::Region}.amazonaws.com/prod/wifi
+  SwitchBotBluetoothEndpoint:
+    Description: POST endpoint for Pico WH home presence webhook.
+    Value: !Sub https://${SwitchBotApi}.execute-api.${AWS::Region}.amazonaws.com/prod/bluetooth
   SwitchBotSlackInteractionsEndpoint:
     Description: POST endpoint for Slack Interactivity (lock button).
     Value: !Sub https://${SwitchBotApi}.execute-api.${AWS::Region}.amazonaws.com/prod/slack/interactions

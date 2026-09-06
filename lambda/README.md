@@ -1,11 +1,11 @@
 # SwitchBot Lambda
 
-SwitchBot OpenAPI v1.1 経由の CO2 センサー監視と、API Gateway 経由の在宅判定（termux-server Webhook）を行う **AWS Lambda** 用コードです。
+SwitchBot OpenAPI v1.1 経由の CO2 センサー監視と、API Gateway 経由の在宅判定（Pico WH Bluetooth Webhook）を行う **AWS Lambda** 用コードです。
 
 ## 動作
 
 - **スケジュール（5分ごと）**: CO2 をチェックし、閾値超過時に Slack へ通知（SSM で通知状態を管理）。スマートロックの解錠も監視し、解錠時に Slack へ通知
-- **POST `/wifi`**: termux-server からの Webhook（`connected` / `disconnected`）に応じて在宅状態を更新し、変化時のみフック処理後に SSM へ `at_home` を保存（API Gateway の API Key 必須）
+- **POST `/bluetooth`**: Pico WH からの Webhook（`connected` / `disconnected`）に応じて在宅状態を更新し、変化時のみフック処理後に SSM へ `at_home` を保存（API Gateway の API Key 必須）
 
 ## 環境変数
 
@@ -27,9 +27,9 @@ SwitchBot OpenAPI v1.1 経由の CO2 センサー監視と、API Gateway 経由�
 {"at_home": false, "updated_at": 1710000000}
 ```
 
-## API（`/wifi`）
+## API（`/bluetooth`）
 
-termux-server の LAN 監視 webhook を受け取り、在宅判定を更新します。
+Pico WH の Bluetooth 監視 webhook を受け取り、在宅判定を更新します。
 
 | フィールド | 必須 | 説明 |
 |------------|------|------|

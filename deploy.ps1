@@ -209,7 +209,7 @@ if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($stackOutputsJson)) {
 
 $stackOutputs = $stackOutputsJson | ConvertFrom-Json
 $apiKeyId = ($stackOutputs | Where-Object { $_.OutputKey -eq "SwitchBotApiKeyId" }).OutputValue
-$wifiEndpoint = ($stackOutputs | Where-Object { $_.OutputKey -eq "SwitchBotWifiEndpoint" }).OutputValue
+$bluetoothEndpoint = ($stackOutputs | Where-Object { $_.OutputKey -eq "SwitchBotBluetoothEndpoint" }).OutputValue
 $slackInteractionsEndpoint = ($stackOutputs | Where-Object { $_.OutputKey -eq "SwitchBotSlackInteractionsEndpoint" }).OutputValue
 
 if ([string]::IsNullOrWhiteSpace($apiKeyId)) {
@@ -231,12 +231,12 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host ""
 Write-Host "API Gateway settings:"
-Write-Host "  WiFi endpoint: $wifiEndpoint"
+Write-Host "  Bluetooth endpoint: $bluetoothEndpoint"
 Write-Host "  Slack Interactivity (Request URL): $slackInteractionsEndpoint"
 Write-Host "  API key (x-api-key): $apiKeyValueOutput"
 Write-Host ""
 Write-Host "Example call:"
-Write-Host ('  curl -X POST "' + $wifiEndpoint + '" -H "x-api-key: ' + $apiKeyValueOutput + '" -H "Content-Type: application/json" -d "{\"event\":\"connected\",\"online\":true,\"checked_at\":\"2026-08-11T14:45:00+09:00\"}"')
+Write-Host ('  curl -X POST "' + $bluetoothEndpoint + '" -H "x-api-key: ' + $apiKeyValueOutput + '" -H "Content-Type: application/json" -d "{\"event\":\"connected\",\"online\":true,\"checked_at\":\"2026-08-11T14:45:00+09:00\"}"')
 
 Write-Host ""
 Write-Host ("Deployment completed: " + (Get-Date -Format "yyyy-MM-dd HH:mm:ss"))

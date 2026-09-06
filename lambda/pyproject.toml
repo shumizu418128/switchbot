@@ -1,7 +1,7 @@
 [project]
 name = "switchbot-api"
 version = "0.1.0"
-description = "AWS Lambda: SwitchBot CO2 監視と WiFi SSID 保存 API"
+description = "AWS Lambda: SwitchBot CO2 監視と Bluetooth 在宅判定 API"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = ["python-dotenv"]

@@ -29,8 +29,8 @@ from switchbot_service import (
 RouteFn = Callable[[dict[str, Any]], dict[str, Any]]
 
 
-def _handle_wifi(body: dict[str, Any]) -> dict[str, Any]:
-    """POST /wifi: termux-server Webhook イベントから在宅判定を更新する。"""
+def _handle_bluetooth(body: dict[str, Any]) -> dict[str, Any]:
+    """POST /bluetooth: Pico WH Webhook イベントから在宅判定を更新する。"""
     event = body.get("event")
 
     if event not in (WIFI_EVENT_CONNECTED, WIFI_EVENT_DISCONNECTED):
@@ -80,7 +80,7 @@ def _handle_slack_interactions(event: ApiGatewayEvent) -> dict[str, Any]:
 
 
 API_ROUTES: dict[tuple[str, str], RouteFn] = {
-    ("POST", "/wifi"): _handle_wifi,
+    ("POST", "/bluetooth"): _handle_bluetooth,
 }
 
 
