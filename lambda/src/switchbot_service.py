@@ -21,6 +21,14 @@ LOCK_ALERT_DELAY_SECONDS = 300
 LIGHT_OFF_TIMER_COMMAND = "30分切り"
 LIGHT_OFF_TIMER_SEND_COUNT = 3
 LIGHT_OFF_TIMER_SEND_GAP_SECONDS = 8
+AC_COOL_ON_TEMP = 28
+AC_HEAT_ON_TEMP = 16
+AC_DRY_ON_HUMIDITY = 70
+AC_COOL_SET_TEMP = 26
+AC_HEAT_SET_TEMP = 20
+AC_MODE_COOL = 2
+AC_MODE_HEAT = 5
+AC_FAN_AUTO = 1
 
 ssm_client = boto3.client("ssm")
 
@@ -59,11 +67,83 @@ def _put_home_presence_state(at_home: bool) -> None:
     )
 
 
+def _get_room_climate() -> tuple[float, float]:
+    """CO2センサーから室温と湿度を取得する。"""
+    path = f"/v1.1/devices/{DeviceId.CO2}/status"
+    response = request_json("GET", path)
+    body = response.get("body", {})
+    temperature = body.get("temperature")
+    humidity = body.get("humidity")
+    if temperature is None or humidity is None:
+        raise SwitchBotError("室温または湿度を取得できませんでした")
+    return float(temperature), float(humidity)
+
+
+def _set_air_conditioner(*, temperature: int, mode: int) -> None:
+    """エアコンを指定モードで起動する。"""
+    path = f"/v1.1/devices/{DeviceId.AIR_CONDITIONER}/commands"
+    request_json(
+        "POST",
+        path,
+        {
+            "commandType": "command",
+            "command": "setAll",
+            "parameter": f"{temperature},{mode},{AC_FAN_AUTO},on",
+        },
+    )
+
+
+def _turn_on_air_conditioner() -> None:
+    """エアコンの電源だけ入れる。"""
+    path = f"/v1.1/devices/{DeviceId.AIR_CONDITIONER}/commands"
+    request_json(
+        "POST",
+        path,
+        {
+            "commandType": "command",
+            "command": "turnOn",
+            "parameter": "default",
+        },
+    )
+
+
+def _maybe_turn_on_air_conditioner() -> str:
+    """室温と湿度を見て、必要なときだけエアコンを付ける。
+
+    Returns:
+        Slack 向けの判定結果テキスト。
+    """
+    temperature, humidity = _get_room_climate()
+    print(
+        f"on_arrived_home: 室温 {temperature}℃ 湿度 {humidity}%",
+        flush=True,
+    )
+    climate = f"`{temperature} ℃`\n`{humidity} %`"
+
+    if temperature >= AC_COOL_ON_TEMP:
+        _set_air_conditioner(temperature=AC_COOL_SET_TEMP, mode=AC_MODE_COOL)
+        return f"{climate}\nエアコン: 冷房{AC_COOL_SET_TEMP}℃"
+    if temperature <= AC_HEAT_ON_TEMP:
+        _set_air_conditioner(temperature=AC_HEAT_SET_TEMP, mode=AC_MODE_HEAT)
+        return f"{climate}\nエアコン: 暖房{AC_HEAT_SET_TEMP}℃"
+    if humidity >= AC_DRY_ON_HUMIDITY:
+        _turn_on_air_conditioner()
+        return f"{climate}\nエアコン: 電源オン"
+    return f"{climate}\nエアコン: 不要"
+
+
 def on_arrived_home() -> None:
     """在宅状態が false から true に変化したときに呼ばれる。"""
     print("on_arrived_home", flush=True)
+    detail = ""
     try:
-        _send_slack_alert("帰宅を検知しました")
+        detail = "\n" + _maybe_turn_on_air_conditioner()
+    except SwitchBotError as exc:
+        print(f"on_arrived_home: エアコン制御失敗: {exc}", flush=True)
+        detail = f"\n<@U099ANR7PL7> :rotating_light: *警告: 帰宅時のエアコン制御に失敗しました*\n`{exc}`"
+
+    try:
+        _send_slack_alert(f"帰宅を検知しました{detail}")
     except Exception as exc:
         print(f"on_arrived_home: Slack送信失敗: {exc}", flush=True)
 
