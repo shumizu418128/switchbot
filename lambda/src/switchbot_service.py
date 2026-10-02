@@ -15,9 +15,7 @@ from switchbot_client import SwitchBotError, request_json
 
 SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "").strip()
 ALERT_STATE_PARAM = os.environ.get("ALERT_STATE_PARAM", "").strip()
-LOCK_ALERT_STATE_PARAM = os.environ.get("LOCK_ALERT_STATE_PARAM", "").strip()
 WIFI_STATE_PARAM = os.environ.get("WIFI_STATE_PARAM", "").strip()
-LOCK_ALERT_DELAY_SECONDS = 300
 LIGHT_OFF_TIMER_COMMAND = "30分切り"
 LIGHT_OFF_TIMER_SEND_COUNT = 3
 LIGHT_OFF_TIMER_SEND_GAP_SECONDS = 8
@@ -348,51 +346,6 @@ def co2_check() -> None:
 #####################################
 # MARK: - Lock
 #####################################
-def _get_lock_alert_state() -> dict[str, Any]:
-    """SSM Parameter Store から鍵通知状態を取得する。"""
-    default = {"alert_active": False, "abnormal_since": None, "updated_at": None}
-    if not LOCK_ALERT_STATE_PARAM:
-        return default
-
-    try:
-        result = ssm_client.get_parameter(
-            Name=LOCK_ALERT_STATE_PARAM, WithDecryption=True
-        )
-        raw_value = result.get("Parameter", {}).get("Value", "{}")
-        state = json.loads(raw_value)
-    except ssm_client.exceptions.ParameterNotFound:
-        return default
-    except (ClientError, json.JSONDecodeError):
-        return default
-
-    return {
-        "alert_active": bool(state.get("alert_active", False)),
-        "abnormal_since": state.get("abnormal_since"),
-        "updated_at": state.get("updated_at"),
-    }
-
-
-def _put_lock_alert_state(
-    *,
-    alert_active: bool,
-    abnormal_since: int | None,
-) -> None:
-    """SSM Parameter Store に鍵通知状態を保存する。"""
-    if not LOCK_ALERT_STATE_PARAM:
-        return
-
-    value = json.dumps(
-        {
-            "alert_active": alert_active,
-            "abnormal_since": abnormal_since,
-            "updated_at": int(time.time()),
-        }
-    )
-    ssm_client.put_parameter(
-        Name=LOCK_ALERT_STATE_PARAM, Value=value, Type="SecureString", Overwrite=True
-    )
-
-
 def _send_lock_slack_alert(
     lock_state: Any,
     door_state: Any,
@@ -414,7 +367,7 @@ def _send_lock_slack_alert(
 
     text = (
         f"<@U099ANR7PL7> :rotating_light: :door: :warning: "
-        f"*警告: ドアが5分以上開いています* :lock:\n{status}"
+        f"*警告: 鍵が解錠されているか、ドアが開いています* :lock:\n{status}"
     )
     slack_message = {
         "text": text,
@@ -472,7 +425,7 @@ def notify_lock_closed() -> None:
 
 
 def lock_check() -> None:
-    """スマートロックの解錠・ドア開状態をチェックし、5分以上継続時に Slack へ通知する。"""
+    """スマートロックの状態を SwitchBot API から取得し、解錠またはドア開なら Slack へ通知する。"""
     path = f"/v1.1/devices/{DeviceId.SMART_LOCK}/status"
 
     response = request_json("GET", path)
@@ -483,26 +436,8 @@ def lock_check() -> None:
 
     is_unlocked = lock_state == "unlocked"
     is_door_closed = door_state == "closed"
-    should_alert = is_unlocked or not is_door_closed
-
-    now = int(time.time())
-    state = _get_lock_alert_state()
-    was_alert_active = bool(state.get("alert_active", False))
-    abnormal_since = state.get("abnormal_since")
-
-    if not should_alert:
-        if was_alert_active or abnormal_since is not None:
-            _put_lock_alert_state(alert_active=False, abnormal_since=None)
-        return
-
-    if abnormal_since is None:
-        _put_lock_alert_state(alert_active=False, abnormal_since=now)
-        return
-
-    elapsed = now - int(abnormal_since)
-    if elapsed >= LOCK_ALERT_DELAY_SECONDS and not was_alert_active:
+    if is_unlocked or not is_door_closed:
         _send_lock_slack_alert(lock_state, door_state, battery)
-        _put_lock_alert_state(alert_active=True, abnormal_since=int(abnormal_since))
 
 
 if __name__ == "__main__":

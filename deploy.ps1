@@ -137,35 +137,6 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host ""
-Write-Host "Checking lock notification state parameter..."
-
-$lockAlertStateParamName = "/$stackName/LOCK_ALERT_STATE"
-$lockAlertStateInitialValue = '{"alert_active":false,"abnormal_since":null,"updated_at":null}'
-$lockParamCheckOutput = (& aws ssm get-parameter `
-    --name $lockAlertStateParamName `
-    --region $awsRegion `
-    --profile $awsProfile 2>&1)
-
-if ($LASTEXITCODE -ne 0) {
-    if (($lockParamCheckOutput -join "`n") -match "ParameterNotFound") {
-        Write-Host "Creating lock notification state parameter: $lockAlertStateParamName"
-        & aws ssm put-parameter `
-            --name $lockAlertStateParamName `
-            --value $lockAlertStateInitialValue `
-            --type "SecureString" `
-            --region $awsRegion `
-            --profile $awsProfile 2>&1 | Out-Host
-
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error "Failed to initialize lock notification state parameter: $lockAlertStateParamName"
-        }
-    } else {
-        Write-Host ($lockParamCheckOutput -join "`n")
-        Write-Error "Failed to check lock notification state parameter: $lockAlertStateParamName"
-    }
-}
-
-Write-Host ""
 Write-Host "deploying..."
 
 $parameterOverrides = @(

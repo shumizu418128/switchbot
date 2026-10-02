@@ -4,7 +4,7 @@ SwitchBot OpenAPI v1.1 経由の CO2 センサー監視と、API Gateway 経由�
 
 ## 動作
 
-- **スケジュール（5分ごと）**: CO2 をチェックし、閾値超過時に Slack へ通知（SSM で通知状態を管理）。スマートロックの解錠も監視し、解錠時に Slack へ通知
+- **スケジュール（5分ごと）**: CO2 をチェックし、閾値超過時に Slack へ通知（SSM で通知状態を管理）。スマートロックは都度 SwitchBot API で状態を取得し、解錠またはドア開のときに Slack へ通知
 - **POST `/bluetooth`**: Pico WH からの Webhook（`connected` / `disconnected`）に応じて在宅状態を更新し、変化時のみフック処理後に SSM へ `at_home` を保存（API Gateway の API Key 必須）
 
 ## 環境変数
@@ -16,7 +16,6 @@ SwitchBot OpenAPI v1.1 経由の CO2 センサー監視と、API Gateway 経由�
 | `SLACK_WEBHOOK_URL` | はい | Slack Incoming Webhook URL |
 | `SWITCHBOT_API_BASE_URL` | いいえ | 省略時 `https://api.switch-bot.com` |
 | `ALERT_STATE_PARAM` | デプロイ時設定 | CO2 通知状態の SSM パラメータ名 |
-| `LOCK_ALERT_STATE_PARAM` | デプロイ時設定 | スマートロック解錠通知状態の SSM パラメータ名 |
 | `WIFI_STATE_PARAM` | デプロイ時設定 | 在宅状態の SSM パラメータ名 |
 
 ## SSM（在宅状態）

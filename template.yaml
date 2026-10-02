@@ -62,7 +62,6 @@ Resources:
                 - ssm:PutParameter
               Resource:
                 - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/CO2_ALERT_STATE
-                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/LOCK_ALERT_STATE
                 - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/WIFI_SSID
       Environment:
         Variables:
@@ -72,7 +71,6 @@ Resources:
           SLACK_SIGNING_SECRET: !Ref SlackSigningSecret
           SWITCHBOT_API_BASE_URL: !Ref SwitchBotApiBaseUrl
           ALERT_STATE_PARAM: !Sub /${AWS::StackName}/CO2_ALERT_STATE
-          LOCK_ALERT_STATE_PARAM: !Sub /${AWS::StackName}/LOCK_ALERT_STATE
           WIFI_STATE_PARAM: !Sub /${AWS::StackName}/WIFI_SSID
       Events:
         FiveMinuteSchedule:
