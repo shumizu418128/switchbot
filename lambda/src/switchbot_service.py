@@ -435,8 +435,7 @@ def lock_check() -> None:
     battery = body.get("battery")
 
     is_unlocked = lock_state == "unlocked"
-    is_door_closed = door_state == "closed"
-    if is_unlocked or not is_door_closed:
+    if is_unlocked:
         _send_lock_slack_alert(lock_state, door_state, battery)
 
 
